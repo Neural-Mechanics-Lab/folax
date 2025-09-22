@@ -35,6 +35,7 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
     def Solve(self,current_control_vars,current_dofs_np:np.array):
         current_dofs = jnp.array(current_dofs_np)
         load_increament = self.nonlinear_solver_settings["load_incr"]
+        write_resnorm = []
         for load_fac in range(load_increament):
             fol_info(f"loadStep; increment:{load_fac+1}")
             applied_BC_dofs = self.fe_loss_function.ApplyDirichletBCOnDofVector(current_dofs,(load_fac+1)/load_increament)
@@ -61,6 +62,9 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                     break
                 else:
                     fol_info(f"iteration:{i+1},delta_norm:{delta_norm},residuals_norm:{res_norm}")
+
+                write_resnorm.append(res_norm)
+                np.savetxt("res_norm_jax.txt",np.array(write_resnorm))
             current_dofs = current_dofs.at[self.fe_loss_function.non_dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.non_dirichlet_indices])
         return applied_BC_dofs
 

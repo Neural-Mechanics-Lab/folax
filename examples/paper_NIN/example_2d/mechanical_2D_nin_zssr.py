@@ -82,15 +82,19 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     #### load a txt file:
     fourier_file = os.path.join(case_dir,f"ifol_fourier_test_samples_K_matrix_res_{model_settings['N']}.txt")
     voronoi_file = os.path.join(case_dir,f"ifol_voronoi_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    tpms_file = os.path.join(case_dir,f"ifol_tpms_test_samples_K_matrix_res_{model_settings['N']}.txt")
+    tpms_settings = {"phi_x": 0., "phi_y": 0., "phi_z": 0., "max": 1., "min": 0.02, "section_axis_value": 0.8,
+                     "constant": 0., "threshold": 0.5, "coefficients":(2.,2.,2.)}
+    K_matrix = create_tpms_schwarz_P(fe_mesh=fe_mesh,tpms_settings=tpms_settings).reshape(-1,1).T
+
+    # tpms_file = os.path.join(case_dir,f"ifol_tpms_test_samples_K_matrix_res_{model_settings['N']}.txt")
     
 
-    K_matrix_fourier = np.loadtxt(fourier_file)
-    K_matrix_voronoi = np.loadtxt(voronoi_file)
-    K_matrix_tpms = np.loadtxt(tpms_file)
+    # K_matrix_fourier = np.loadtxt(fourier_file)
+    # K_matrix_voronoi = np.loadtxt(voronoi_file)
+    # K_matrix_tpms = np.loadtxt(tpms_file)
 
-    K_matrix_1 = np.vstack((K_matrix_fourier,K_matrix_voronoi))
-    K_matrix = np.vstack((K_matrix_1, K_matrix_tpms))
+    # K_matrix_1 = np.row_stack((K_matrix_fourier,K_matrix_voronoi))
+    # K_matrix = np.row_stack((K_matrix_1, K_matrix_tpms))
 
 
     # now we need to create, initialize and train fol
@@ -174,29 +178,35 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     
     solve_ifol = True
     if solve_ifol:
-        ifol.Train(train_set=(train_set,),
-                    test_set=(test_set,),
-                    test_frequency=100,
-                    batch_size=train_settings_dict["batch_size"],
-                    convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
-                    plot_settings={"plot_save_rate":100},
-                    train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-                    working_directory=case_dir)
+        # ifol.Train(train_set=(train_set,),
+        #             test_set=(test_set,),
+        #             test_frequency=100,
+        #             batch_size=train_settings_dict["batch_size"],
+        #             convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
+        #             plot_settings={"plot_save_rate":100},
+        #             train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+        #             working_directory=case_dir)
 
+
+        # load teh best model
+        ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
+
+        print("K matrix: ", K_matrix.shape)
         if parametric_learning:
             iFOL_UVW = np.array(ifol.Predict(K_matrix))
         else:
             iFOL_UVW = np.array(ifol.Predict(K_matrix[otf_id].reshape(-1,1).T))
-
-    # load teh best model
-    ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
-
     U_dict = {}
     for eval_id in tests:
         if solve_ifol:
             ifol_uvw = np.array(iFOL_UVW[eval_id,:].reshape(-1,1).T)
+            # ifol_stress = get_stress(loss_function=mechanical_loss_2d, fe_mesh=fe_mesh,
+            #                               disp_field_vec=jnp.array(ifol_uvw), K_matrix=jnp.array(K_matrix[eval_id,:]))
+            
             fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
+            # fe_mesh[f"iFOL_stress_{eval_id}"] = ifol_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            # np.savetxt("ifol_solution.txt",ifol_uvw)
 
         # solve FE here
         if solve_FE:
@@ -209,16 +219,25 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
 
             fe_mesh[f'FE_U_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
-
+            # fe_stress = get_stress(loss_function=mechanical_loss_2d, fe_mesh=fe_mesh,
+            #                           disp_field_vec=jnp.array(FE_UVW), K_matrix=jnp.array(K_matrix[eval_id,:]))
             if solve_ifol:
                 abs_err = abs(FE_UVW.reshape(-1,1) - ifol_uvw.reshape(-1,1))
+                # abs_stress_err = abs(fe_stress.reshape(-1,1) - ifol_stress.reshape(-1,1))
+                
                 fe_mesh[f"abs_U_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 2))
+                # fe_mesh[f"FE_stress_{eval_id}"] = fe_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+                # fe_mesh[f"abs_stress_error_{eval_id}"] = abs_stress_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
                 U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
+                # U_dict[f'Stress_iFOL_{eval_id}'] = ifol_stress
                 U_dict[f"abs_error_{eval_id}"] = abs_err
+                # U_dict[f'abs_stress_error_{eval_id}'] = abs_stress_err
 
+            
             U_dict[f'K_matrix_{eval_id}'] = K_matrix[eval_id,:]
             U_dict[f'U_FE_{eval_id}'] = FE_UVW
+            # U_dict[f'Stress_FE_{eval_id}'] = fe_stress
 
             # # save solution for base resolution as fields in a pkl file.  
             # with open(f"U_base_res_{model_settings['N']}_bc_{model_settings['Ux_right']}.pkl" , 'wb') as f:

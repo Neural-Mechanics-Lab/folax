@@ -571,3 +571,22 @@ def create_hex_mesh_with_spheres(Lx, Ly, Lz, nx, ny, nz, sphere_centers, sphere_
     meshio.write(vtk_file, mesh)
 
     return mesh
+
+def plot_norm_iter(data,plot_name='res_norm_iter'):
+
+    plt.plot(np.arange(len(data)), data, marker='o', label="Convergence history")
+    plt.yscale("log")
+    plt.grid(which="both", linestyle="--", linewidth=0.7, alpha=0.7)  # clearer grid
+    
+    plt.xlabel("Iteration")
+    plt.xlim()
+    plt.ylabel("Residual norm")
+    plt.title("Convergence vs Iteration (jax)")
+    
+    # set x-axis ticks every 5
+    plt.xticks(np.arange(0, len(data) + 1, 5))
+    
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{plot_name}.png")
+    plt.close()

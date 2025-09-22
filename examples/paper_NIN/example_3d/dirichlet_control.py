@@ -28,32 +28,35 @@ class DirichletControl3D(Control):
         if self.initialized and not reinitialize:
             return
 
-        self.boundary_node_ids = jnp.array(self.fe_mesh.GetNodeSet("right"))
+        self.boundary_node_at_right_ids = jnp.array(self.fe_mesh.GetNodeSet("right"))
+        self.boundary_node_at_top_ids = jnp.array(self.fe_mesh.GetNodeSet("top"))
         self.dirichlet_values = self.loss_function.dirichlet_values
         self.dirichlet_indices = self.loss_function.dirichlet_indices
         dirichlet_indices_dict = self.loss_function.dirichlet_indices_dict
+
+        learning_dirichlet_indices = []
         for dof in self.settings["learning_boundary"].keys():
-            for laerning_boundary_tag in dirichlet_indices_dict[dof].keys():
-                if laerning_boundary_tag=='right' and dof=='Ux':
-                    self.right_indices_ux = dirichlet_indices_dict[dof]['right']
-                if laerning_boundary_tag=='right' and dof=='Uy':
-                    self.right_indices_uy = dirichlet_indices_dict[dof]['right']
+            for learning_boundary_tag in self.settings["learning_boundary"][dof]:
+                learning_dirichlet_indices.append(dirichlet_indices_dict[dof][learning_boundary_tag])
+        self.learning_dirichlet_indices = np.array(learning_dirichlet_indices)
 
         self.dofs = self.loss_function.loss_settings.get("ordered_dofs")
         self.dirichlet_bc_dict = self.loss_function.loss_settings.get("dirichlet_bc_dict")
         self.dim = self.loss_function.loss_settings.get("compute_dims")
     
-        self.num_control_vars = 2   #len(self.dirichlet_indices) / 2
+        self.num_control_vars = 2  
         self.num_controlled_vars = self.fe_mesh.GetNumberOfNodes()
         self.initialized = True
 
+    
     @partial(jit, static_argnums=(0,))
     def ComputeControlledVariables(self,variable_vector:jnp.array):
         dof_values = jnp.zeros(3*self.fe_mesh.GetNumberOfNodes(), dtype=jnp.float64)
         dof_values = dof_values.at[self.dirichlet_indices].set(self.dirichlet_values)
-        dof_values = dof_values.at[self.right_indices_ux].set(jnp.full(self.boundary_node_ids.shape, variable_vector[0], dtype=jnp.float32))
-        dof_values = dof_values.at[self.right_indices_uy].set(jnp.full(self.boundary_node_ids.shape, variable_vector[1], dtype=jnp.float32))
-        # dof_values = dof_values.at[self.right_indices_uz].set(jnp.full(self.boundary_node_ids.shape, variable_vector[2], dtype=jnp.float32))
+
+        for i in range(self.num_control_vars):
+            indices = np.ix_(self.learning_dirichlet_indices[i])
+            dof_values = dof_values.at[indices].set(jnp.full(self.learning_dirichlet_indices[i].shape, variable_vector[i], dtype=jnp.float64))
 
         dirichlet_values = dof_values[self.dirichlet_indices]
         return dirichlet_values

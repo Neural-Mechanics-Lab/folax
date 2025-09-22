@@ -24,7 +24,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     #call the function to create the mesh
-    mesh_name = "cruciform_fine_v2"
+    mesh_name = "cruciform_mid_v2"
     fe_mesh = Mesh("fol_io",f"{mesh_name}.med",os.path.join('.','../../meshes'))
     fe_mesh.Initialize()
 
@@ -54,9 +54,9 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     coeffs_matrix = np.concatenate((ux_comp,uy_comp),axis=1)
     K_matrix = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
 
-    coeffs_matrix_test = np.array([[0.3,0.05],
-                                   [0.05,0.3],
-                                   [0.3,0.3]])
+    coeffs_matrix_test = np.array([[0.4,0.05],
+                                   [0.05,0.4],
+                                   [0.4,0.4]])
     
     # now we need to create, initialize and train fol
     ifol_settings_dict = {
@@ -126,6 +126,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     for eval_id in range(coeffs_matrix_test.shape[0]):
         FOL_UVW = np.array(ifol.Predict(coeffs_matrix_test[eval_id,:].reshape(-1,1).T)).reshape(-1)
         fe_mesh[f'U_FOL_{eval_id}'] = FOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+        
         # solve FE here
         updated_bc = bc_dict.copy()
         updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix_test[eval_id,0]},
@@ -137,6 +138,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         mechanical_loss_3d_updated = SaintVenantMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
                                                                                     fe_mesh=fe_mesh)
         mechanical_loss_3d_updated.Initialize()
+        ifol_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FOL_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+        fe_mesh[f'P_iFOL_{eval_id}'] = ifol_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))
         try:
             hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                     "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
@@ -145,6 +148,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
             nonlin_hfe_solver.Initialize()
             HFE_UVW = np.array(nonlin_hfe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),FOL_UVW.reshape(3*fe_mesh.GetNumberOfNodes())))
             plot_norm_iter(data=np.loadtxt("res_norm_jax.txt"),plot_name=case_dir+f'/res_norm_iter_{mesh_name}_HFEM_BC_{coeffs_matrix_test[eval_id,:]}')
+            HFE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=HFE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+            fe_mesh[f'P_NIN_{eval_id}'] = HFE_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))
         except:
             ValueError('res_norm contains nan values!')
             HFE_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
@@ -160,6 +165,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
         fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
         plot_norm_iter(data=np.loadtxt("res_norm_jax.txt"),plot_name=case_dir+f'/res_norm_iter_{mesh_name}_FE_BC_{coeffs_matrix_test[eval_id,:]}')
+        FE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+        fe_mesh[f'P_FE_{eval_id}'] = FE_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))
 
     fe_mesh.Finalize(export_dir=case_dir)
 

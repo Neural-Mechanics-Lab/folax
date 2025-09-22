@@ -82,7 +82,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     #### load a txt file:
     fourier_file = os.path.join(case_dir,f"ifol_fourier_test_samples_K_matrix_res_{model_settings['N']}.txt")
     voronoi_file = os.path.join(case_dir,f"ifol_voronoi_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    tpms_settings = {"phi_x": 0., "phi_y": 0., "phi_z": 0., "max": 1., "min": 0.02, "section_axis_value": 0.8,
+    tpms_settings = {"phi_x": 0., "phi_y": 0., "phi_z": 0., "max": 1., "min": 0.05, "section_axis_value": 0.8,
                      "constant": 0., "threshold": 0.5, "coefficients":(2.,2.,2.)}
     K_matrix = create_tpms_schwarz_P(fe_mesh=fe_mesh,tpms_settings=tpms_settings).reshape(-1,1).T
 

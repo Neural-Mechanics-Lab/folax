@@ -9,6 +9,11 @@ import os
 import shutil
 from fol.mesh_input_output.mesh import Mesh
 import copy
+from fol.loss_functions.fe_loss import FiniteElementLoss
+import jax
+import jax.numpy as jnp
+from jax import jit
+from functools import partial
 
 def plot_mesh_vec_data(L, vectors_list, subplot_titles=None, fig_title=None, cmap='viridis',
                        block_bool=False, colour_bar=True, colour_bar_name=None,
@@ -789,3 +794,114 @@ def build_simple_shear_dirichlet(mesh,
         bc_uz[g] = 0.0
 
     return {"Ux": bc_ux, "Uy": bc_uy, "Uz": bc_uz}
+
+def create_S_mat(S:jnp.ndarray):
+    if S.size == 3:
+        S_mat = jnp.zeros((2,2))
+        S_mat = S_mat.at[0,0].set(S[0,0])
+        S_mat = S_mat.at[0,1].set(S[2,0])
+        S_mat = S_mat.at[1,0].set(S[2,0])
+        S_mat = S_mat.at[1,1].set(S[1,0])
+    elif S.size == 6:
+        S_mat = jnp.zeros((3,3))
+        S_mat = S_mat.at[0,0].set(S[0,0])
+        S_mat = S_mat.at[0,1].set(S[5,0])
+        S_mat = S_mat.at[0,2].set(S[4,0])
+        S_mat = S_mat.at[1,0].set(S[5,0])
+        S_mat = S_mat.at[1,1].set(S[1,0])
+        S_mat = S_mat.at[1,2].set(S[3,0])
+        S_mat = S_mat.at[2,0].set(S[4,0])
+        S_mat = S_mat.at[2,1].set(S[3,0])
+        S_mat = S_mat.at[2,2].set(S[2,0])
+    return S_mat
+
+# @partial(jit)
+def ComputeElementStressAtGauss(loss_function,xyze,de,uvwe):
+    @jit
+    def compute_at_gauss_point(gp_point):
+        N_vec = loss_function.fe_element.ShapeFunctionsValues(gp_point)
+        DN_DX_T = loss_function.fe_element.ShapeFunctionsGlobalGradients(xyze,gp_point).T
+        J = loss_function.fe_element.Jacobian(xyze,gp_point)
+
+        e_at_gauss = jnp.dot(N_vec, de.squeeze())
+        k_at_gauss = e_at_gauss / (3 * (1 - 2*loss_function.v))
+        mu_at_gauss = e_at_gauss / (2 * (1 + loss_function.v))
+
+        _,F,_ = loss_function.CalculateKinematics(DN_DX_T,uvwe)
+        _,S,_ = loss_function.material_model.evaluate(F,k_at_gauss,mu_at_gauss)
+        S_mat = create_S_mat(S)
+        P = jnp.dot(F,S_mat)    # first Piola Kirchhoff stress tensor
+        P = loss_function.material_model.TensorToVoigt(P)
+        return P.flatten()
+    gp_points,_ = loss_function.fe_element.GetIntegrationData()
+    stress_at_gauss = jax.vmap(compute_at_gauss_point,in_axes=(0,))(gp_points)
+    return stress_at_gauss
+    
+def compute_nodal_stress_from_gauss(total_stress: jnp.ndarray, element_nodes: np.ndarray, num_nodes: int) -> jnp.ndarray:
+    """
+    Args:
+        total_stress: jnp.ndarray of shape (num_elements, 4, 3) - stress at Gauss points
+        element_nodes: np.ndarray of shape (num_elements, 4) - node indices per element
+        num_nodes: total number of nodes in the mesh
+
+    Returns:
+        nodal_stress: jnp.ndarray of shape (num_nodes, 3) - averaged stress per node
+    """
+    # Accumulators
+    stress_accumulator = np.zeros((num_nodes, 6), dtype=np.float32)
+    count_accumulator = np.zeros((num_nodes,), dtype=np.int32)
+
+    num_elements, num_gauss, _ = total_stress.shape
+
+    # For each element
+    for e in range(num_elements):
+        nodes = element_nodes[e]  # (4,) node indices
+        gauss_stresses = total_stress[e]  # (4, 3)
+
+        # Assuming Gauss point i corresponds to node i (common in reduced integration)
+        for i in range(4):
+            node_id = nodes[i]
+            stress_accumulator[node_id] += np.array(gauss_stresses[i])
+            count_accumulator[node_id] += 1
+
+    # Avoid divide-by-zero
+    count_accumulator[count_accumulator == 0] = 1
+    nodal_stress = stress_accumulator / count_accumulator[:, None]  # shape: (num_nodes, 3)
+    return jnp.array(nodal_stress)
+
+
+def get_stress(loss_function:FiniteElementLoss, disp_field_vec:np.ndarray, K_matrix:np.ndarray):
+    element_nodes = loss_function.fe_mesh.GetElementsNodes(loss_function.element_type)
+    total_control_vars = K_matrix.reshape(-1,1)
+
+    # @partial(jit, static_argnums=(0,))
+    def ComputeElementStressVmapCompatible(element_id:jnp.integer,
+                                            elements_nodes:jnp.array,
+                                            xyz:jnp.array,
+                                            full_control_vector:jnp.array,
+                                            full_dof_vector:jnp.array):
+            return ComputeElementStressAtGauss(loss_function,
+                                               xyz[elements_nodes[element_id],:],
+                                            full_control_vector[elements_nodes[element_id]],
+                                            full_dof_vector[((loss_function.number_dofs_per_node*elements_nodes[element_id])[:, jnp.newaxis] +
+                                            jnp.arange(loss_function.number_dofs_per_node))].reshape(-1,1))
+
+    # @partial(jit)
+    def ComputeElementsStresses(total_control_vars:jnp.array,total_primal_vars:jnp.array):
+        # parallel calculation of energies
+        return jax.vmap(ComputeElementStressVmapCompatible,(0,None,None,None,None)) \
+                        (loss_function.fe_mesh.GetElementsIds(loss_function.element_type),
+                        loss_function.fe_mesh.GetElementsNodes(loss_function.element_type),
+                        loss_function.fe_mesh.GetNodesCoordinates(),
+                        total_control_vars,
+                        total_primal_vars)
+    # @partial(jit)
+    def ComputeTotalStress(total_control_vars:jnp.array,total_primal_vars:jnp.array):
+        return ComputeElementsStresses(total_control_vars.reshape(-1,1),total_primal_vars)
+    
+
+    total_stress = ComputeTotalStress(jnp.array(total_control_vars),jnp.array(disp_field_vec))
+    num_nodes = loss_function.fe_mesh.GetNumberOfNodes()
+    nodal_stress = compute_nodal_stress_from_gauss(total_stress, element_nodes, num_nodes)
+
+    return nodal_stress.flatten()

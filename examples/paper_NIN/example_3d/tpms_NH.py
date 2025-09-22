@@ -188,7 +188,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         # shear BCs
         updated_bc_shear = bc_dict.copy()
         updated_bc_shear.update({"Ux":{"left":0.,"right":0.},
-                            "Uy":{"left":0.,"right":0.25},
+                            "Uy":{"left":0.,"right":0.2},
                             "Uz":{"left":0.,"right":0.}})
         
         # Compression BCs
@@ -230,6 +230,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
             fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            FE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+            fe_mesh[f'P_FE_{eval_id}'] = FE_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))
 
     fe_mesh.Finalize(export_dir=case_dir,export_format='vtu')
 

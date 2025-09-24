@@ -1,8 +1,9 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
-#import jax
-#jax.config.update("jax_platform_name","cpu")
+import jax
+jax.config.update("jax_platform_name","cpu")
+jax.config.update("jax_enable_x64",True)
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
@@ -36,7 +37,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     # problem setup
-    model_settings = {"L":1,"N":81,
+    model_settings = {"L":1,"N":41,
                     "Ux_left":0.0,"Ux_right":0.5,
                     "Uy_left":0.0,"Uy_right":0.5}
 
@@ -80,21 +81,34 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     # fol_info(f"K_matrix shape loaded from {file_path}: {K_matrix.shape}")
 
     #### load a txt file:
-    fourier_file = os.path.join(case_dir,f"ifol_fourier_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    voronoi_file = os.path.join(case_dir,f"ifol_voronoi_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    tpms_settings = {"phi_x": 0., "phi_y": 0., "phi_z": 0., "max": 1., "min": 0.05, "section_axis_value": 0.8,
-                     "constant": 0., "threshold": 0.5, "coefficients":(2.,2.,2.)}
-    K_matrix = create_tpms_schwarz_P(fe_mesh=fe_mesh,tpms_settings=tpms_settings).reshape(-1,1).T
+    data_dir = os.path.join('.', working_directory_name+"_data")
+    pc = 0.1
+    fourier_file = os.path.join(data_dir,f"K_matrix_fourier_res_{model_settings['N']}.txt")
+    voronoi_file = os.path.join(data_dir,f"K_matrix_voronoi_res_{model_settings['N']}.txt")
+    voronoi_multi_file = os.path.join(data_dir,f"K_matrix_voronoi_multi_res_{model_settings['N']}.txt")
+    tpms_file = os.path.join(data_dir,f"K_matrix_tpms_res_{model_settings['N']}.txt")
+    
+    # tpms_settings = {"phi_x": 0., "phi_y": 0., "phi_z": 0., "max": 1., "min": 0.1, "section_axis_value": 1.0,
+    #                  "constant": 0., "threshold": 0.5, "coefficients":(2.,2.,2.)}
+    # K_matrix = create_tpms_gyroid(fe_mesh=fe_mesh,tpms_settings=tpms_settings).reshape(-1,1).T
 
     # tpms_file = os.path.join(case_dir,f"ifol_tpms_test_samples_K_matrix_res_{model_settings['N']}.txt")
     
 
-    # K_matrix_fourier = np.loadtxt(fourier_file)
-    # K_matrix_voronoi = np.loadtxt(voronoi_file)
-    # K_matrix_tpms = np.loadtxt(tpms_file)
+    K_matrix_fourier = np.loadtxt(fourier_file)
+    print("minimum value of K matrix : ",np.min(K_matrix_fourier))
+    K_matrix_voronoi_multi = np.loadtxt(voronoi_multi_file)
 
-    # K_matrix_1 = np.row_stack((K_matrix_fourier,K_matrix_voronoi))
-    # K_matrix = np.row_stack((K_matrix_1, K_matrix_tpms))
+    K_matrix_voronoi = np.loadtxt(voronoi_file)
+    for i in range(K_matrix_voronoi.shape[0]):
+        K_matrix_voronoi[i,:] = np.where(K_matrix_voronoi[i,:] < 1., pc, 1.)
+    
+    K_matrix_tpms = np.loadtxt(tpms_file)
+    for i in range(K_matrix_tpms.shape[0]):
+        K_matrix_tpms[i,:] = np.where(K_matrix_tpms[i,:] < 1., pc, 1.)
+
+    K_matrix_1 = np.vstack((K_matrix_fourier,K_matrix_voronoi))
+    K_matrix = np.vstack((K_matrix_1, K_matrix_tpms))
 
 
     # now we need to create, initialize and train fol
@@ -157,7 +171,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     test_set_pr = K_matrix[test_start_id,test_end_id]
 
     # OTF or Parametric 
-    parametric_learning = False
+    parametric_learning = True
     if parametric_learning:
         train_set = train_set_pr
         test_set = test_set_pr
@@ -197,46 +211,73 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
         else:
             iFOL_UVW = np.array(ifol.Predict(K_matrix[otf_id].reshape(-1,1).T))
     U_dict = {}
-    for eval_id in tests:
+    ifol_solution_dict = {}
+    U_dict_base = {}
+    with open(os.path.join(data_dir,f'U_base_res_{model_settings["N"]}_PC_{pc}.pkl'), 'rb') as f:
+        U_dict_base = pickle.load(f)
+    indices = []
+    for i in range(K_matrix.shape[0]):
+        if U_dict_base.get(f"U_FE_{model_settings['N']}_{i}") is not None:
+            indices.append(i)
+    
+    nan_indices = []
+    solved_indices = []
+    max_error_indices = []
+    max_error = []
+    mean_error = []
+    for eval_id in indices:
+    # for eval_id in range(K_matrix.shape[0]):
         if solve_ifol:
-            ifol_uvw = np.array(iFOL_UVW[eval_id,:].reshape(-1,1).T)
-            # ifol_stress = get_stress(loss_function=mechanical_loss_2d, fe_mesh=fe_mesh,
-            #                               disp_field_vec=jnp.array(ifol_uvw), K_matrix=jnp.array(K_matrix[eval_id,:]))
+            ifol_uvw = np.array(iFOL_UVW[eval_id,:].reshape(-1,1).T).reshape(-1)
+            ifol_stress = get_stress(loss_function=mechanical_loss_2d, disp_field_vec=ifol_uvw, K_matrix=np.array(K_matrix[eval_id,:]))
             
             fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
-            # fe_mesh[f"iFOL_stress_{eval_id}"] = ifol_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
-            # np.savetxt("ifol_solution.txt",ifol_uvw)
+            fe_mesh[f"iFOL_stress_{eval_id}"] = ifol_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            
+            ifol_solution_dict[f'sample_{eval_id}'] = {}
+            ifol_solution_dict[f'sample_{eval_id}'] = {
+                "bc_dict": bc_dict,
+                "eval_id": eval_id,
+                "model_settings": model_settings,
+                "solution_field": ifol_uvw,
+                "First_Piola_Kirchhoff_field": ifol_stress,
+                "total_K_matrix": K_matrix
+            }
+            with open(os.path.join(case_dir,'ifol_solution.pkl'), 'wb') as f:
+                pickle.dump(ifol_solution_dict,f)
 
         # solve FE here
         if solve_FE:
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                        "nonlinear_solver_settings":{"rel_tol":1e-7,"abs_tol":1e-7,
-                                                        "maxiter":8,"load_incr":51}}
+                        "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                                        "maxiter":10,"load_incr":53},
+                        "output_directory":case_dir}
             nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_2d,fe_setting)
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(K_matrix[eval_id,:],np.zeros(2*fe_mesh.GetNumberOfNodes())))  
+            plot_norm_iter(data=np.loadtxt(os.path.join(case_dir,"res_norm_jax.txt")),plot_name=case_dir+"/res_norm_iter_FE",type='1')
 
             fe_mesh[f'FE_U_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
-            # fe_stress = get_stress(loss_function=mechanical_loss_2d, fe_mesh=fe_mesh,
-            #                           disp_field_vec=jnp.array(FE_UVW), K_matrix=jnp.array(K_matrix[eval_id,:]))
+            fe_stress = get_stress(loss_function=mechanical_loss_2d, disp_field_vec=FE_UVW, K_matrix=np.array(K_matrix[eval_id,:]))
+            
             if solve_ifol:
                 abs_err = abs(FE_UVW.reshape(-1,1) - ifol_uvw.reshape(-1,1))
-                # abs_stress_err = abs(fe_stress.reshape(-1,1) - ifol_stress.reshape(-1,1))
+                abs_stress_err = abs(fe_stress.reshape(-1,1) - ifol_stress.reshape(-1,1))
                 
                 fe_mesh[f"abs_U_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 2))
-                # fe_mesh[f"FE_stress_{eval_id}"] = fe_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
-                # fe_mesh[f"abs_stress_error_{eval_id}"] = abs_stress_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
+                fe_mesh[f"FE_stress_{eval_id}"] = fe_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+                fe_mesh[f"abs_stress_error_{eval_id}"] = abs_stress_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
-                U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
+                # U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
                 # U_dict[f'Stress_iFOL_{eval_id}'] = ifol_stress
-                U_dict[f"abs_error_{eval_id}"] = abs_err
+                # U_dict[f"abs_error_{eval_id}"] = abs_err
                 # U_dict[f'abs_stress_error_{eval_id}'] = abs_stress_err
 
             
-            U_dict[f'K_matrix_{eval_id}'] = K_matrix[eval_id,:]
-            U_dict[f'U_FE_{eval_id}'] = FE_UVW
+            # U_dict[f'K_matrix_{eval_id}'] = K_matrix[eval_id,:]
+            # U_dict[f'U_FE_{eval_id}'] = FE_UVW
             # U_dict[f'Stress_FE_{eval_id}'] = fe_stress
 
             # # save solution for base resolution as fields in a pkl file.  
@@ -247,20 +288,38 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
             # hybrid solver
             fol_info("solve fe hybrid in one load step")
             hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                        "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
-                                                        "maxiter":10,"load_incr":1}}
+                        "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                                        "maxiter":10,"load_incr":1},
+                        "output_directory":case_dir}
             hybrid_nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("hybrid_nonlin_fe_solver",mechanical_loss_2d,hfe_setting)
             hybrid_nonlin_fe_solver.Initialize()
             try:    
-                FE_H_UVW = np.array(hybrid_nonlin_fe_solver.Solve(K_matrix[eval_id,:],ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes())))  
+                FE_NIN_UVW = np.array(hybrid_nonlin_fe_solver.Solve(K_matrix[eval_id,:],ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes())))  
+                plot_norm_iter(data=np.loadtxt(os.path.join(case_dir,'res_norm_jax.txt')),
+                               plot_name=os.path.join(case_dir,'plots')+f"\\res_norm_iter_NiN_{eval_id}")
+                solved_indices.append(eval_id)
             except:
                 ValueError("res_norm contains nan values!")
-                FE_H_UVW = np.zeros(2*fe_mesh.GetNumberOfNodes())
+                FE_NIN_UVW = np.zeros(2*fe_mesh.GetNumberOfNodes())
+                nan_indices.append(eval_id)
 
-            fe_mesh[f'HFE_U_{eval_id}'] = FE_H_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
+            fe_mesh[f'HFE_U_{eval_id}'] = FE_NIN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
+            
+            FE_base = U_dict_base[f"U_FE_{model_settings['N']}_{eval_id}"]
+            abs_err = abs(FE_base.reshape(-1,1) - ifol_uvw.reshape(-1,1))
+            max_error.append(np.max(abs_err))
+            mean_error.append(np.mean(abs_err))
+            if float(np.max(abs_err)) > 0.4:
+                max_error_indices.append(eval_id)
+            if len(solved_indices) > 0:
+                print("solved index: ", solved_indices[-1])
+            if len(nan_indices) > 0:    
+                print("nan index: ", nan_indices[-1])
 
-
+            plot_iFOL_HFE(topology_field=K_matrix[eval_id,:], ifol_sol_field=ifol_uvw, hfe_sol_field=FE_NIN_UVW,
+                 err_sol_field=abs_err, file_name=os.path.join(case_dir,'plots')+f"\\ifol_nin_error_{eval_id}")
+            
             # plot_settings = {"topology_field":K_matrix[eval_id,:], "ifol_sol_field":ifol_uvw, "fe_sol_field":FE_UVW, 
             #                     "hfe_sol_field":FE_H_UVW, "err_sol_field":abs_err, 
             #                     "file_name":f"plot_ifol_fe_{eval_id}_res_{model_settings['N']}"}
@@ -273,6 +332,11 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
             #     plot_settings=plot_settings,
             #     file_name=f"output_{eval_id}_res_{model_settings['N']}",case_dir=case_dir,file_format='json')
 
+    np.savetxt(os.path.join(case_dir,"nan_indices.txt"),np.array(nan_indices))
+    np.savetxt(os.path.join(case_dir,"solved_indices.txt"),np.array(solved_indices))
+    np.savetxt(os.path.join(case_dir,"max_error.txt"),np.array(max_error))
+    np.savetxt(os.path.join(case_dir,"mean_error.txt"),np.array(mean_error))
+    np.savetxt(os.path.join(case_dir,"max_error_indices.txt"),np.array(max_error_indices))
 
     fe_mesh.Finalize(export_dir=case_dir)
 
@@ -284,8 +348,8 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
 if __name__ == "__main__":
     # Initialize default values
     ifol_num_epochs = 3000
-    solve_FE = True
-    solve_FE_hybrid = False
+    solve_FE = False
+    solve_FE_hybrid = True
     clean_dir = False
 
     # Parse the command-line arguments

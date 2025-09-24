@@ -572,21 +572,28 @@ def create_hex_mesh_with_spheres(Lx, Ly, Lz, nx, ny, nz, sphere_centers, sphere_
 
     return mesh
 
-def plot_norm_iter(data,plot_name='res_norm_iter'):
+def plot_norm_iter(data,plot_name='res_norm_iter',type=None):
 
-    plt.plot(np.arange(len(data)), data, marker='o', label="Convergence history")
+    
+    if type=='1':
+        plt.figure(figsize=(10,4))
+    else:
+        plt.figure(figsize=(2,4))
+        
+    plt.plot(np.arange(len(data)), data, marker='o', color='black')
     plt.yscale("log")
     plt.grid(which="both", linestyle="--", linewidth=0.7, alpha=0.7)  # clearer grid
     
-    plt.xlabel("Iteration")
+    plt.xlabel("Iteration",fontdict={"size": 16})
     plt.xlim()
-    plt.ylabel("Residual norm")
-    plt.title("Convergence vs Iteration (jax)")
+    if type=='1':    
+        plt.ylabel("Residual norm",fontdict={"size": 16})
+    plt.ylim((1e-7,3e-1))
     
-    # set x-axis ticks every 5
-    plt.xticks(np.arange(0, len(data) + 1, 5))
+    # # set x-axis ticks every 5
+    # plt.xticks(np.arange(0, len(data) + 1, 5))
     
-    plt.legend()
     plt.tight_layout()
     plt.savefig(f"{plot_name}.png")
+    print(f"plot saved to {plot_name}")
     plt.close()

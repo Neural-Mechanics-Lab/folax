@@ -198,7 +198,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                             "Uz":{"left":0.,"right":0.}})
 
         updated_loss_setting = loss_settings.copy()
-        updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_shear})
+        updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_compression})
         mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
                                                                                     fe_mesh=fe_mesh)
         mechanical_loss_3d_updated.Initialize()
@@ -219,16 +219,18 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
         if solve_FE:
             updated_loss_setting = loss_settings.copy()
-            updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_shear})
+            updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_compression})
             mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
                                                                                     fe_mesh=fe_mesh)
             mechanical_loss_3d_updated.Initialize()
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                    "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
-                                                    "maxiter":8,"load_incr":20}}
+                    "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                                    "maxiter":8,"load_incr":30}}
             nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
+            plot_norm_iter(data=np.loadtxt("res_norm_jax.txt"),plot_name='res_norm_iter_FE',type='1')
+
             fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
             FE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
             fe_mesh[f'P_FE_{eval_id}'] = FE_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))

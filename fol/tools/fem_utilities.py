@@ -359,7 +359,7 @@ class NeoHookianModel(MaterialModel):
     Material model.
     """
     @partial(jit, static_argnums=(0,))
-    def evaluate(self, F, k, mu):
+    def evaluate(self, F, k, mu, *args, **keyargs):
         """
         Evaluate the stress and tangent operator at given local coordinates.
         This method should be overridden by subclasses.
@@ -411,7 +411,7 @@ class NeoHookianModel2D(MaterialModel):
     Material model.
     """
     @partial(jit, static_argnums=(0,))
-    def evaluate(self, F, k, mu):
+    def evaluate(self, F, k, mu, *args, **keyargs):
         """
         Evaluate the stress and tangent operator at given local coordinates.
         This method should be overridden by subclasses.
@@ -462,7 +462,7 @@ class SaintVenant(MaterialModel):
     Material model.
     """
     @partial(jit, static_argnums=(0,))
-    def evaluate(self, F, lambda_, mu):
+    def evaluate(self, F, lambda_, mu, *args, **keyargs):
         """
         Evaluate the stress and tangent operator at given local coordinates.
         This method should be overridden by subclasses.

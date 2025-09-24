@@ -9,8 +9,9 @@ import time
 import json
 from datetime import datetime
 from matplotlib import gridspec
+from pathlib import Path
 
-def create_tpms_gyroid(fe_mesh: Mesh, tpms_settings: dict):
+def create_tpms_gyroid(fe_mesh: Mesh, tpms_settings: dict) -> jnp.ndarray:
     """
     section: dict with keys:
         - "axis of section": "z"
@@ -534,48 +535,111 @@ def plot_tpms_2d(tpms_settings: dict, model_settings: dict, tpms_fn: Callable, f
 import numpy as np
 import jax.numpy as jnp
 
-def compute_nodal_stress_from_gauss(total_stress: jnp.ndarray, element_nodes: np.ndarray, num_nodes: int) -> jnp.ndarray:
-    """
-    Args:
-        total_stress: jnp.ndarray of shape (num_elements, 4, 3) - stress at Gauss points
-        element_nodes: np.ndarray of shape (num_elements, 4) - node indices per element
-        num_nodes: total number of nodes in the mesh
+# def compute_nodal_stress_from_gauss(total_stress: jnp.ndarray, element_nodes: np.ndarray, num_nodes: int) -> jnp.ndarray:
+#     """
+#     Args:
+#         total_stress: jnp.ndarray of shape (num_elements, 4, 3) - stress at Gauss points
+#         element_nodes: np.ndarray of shape (num_elements, 4) - node indices per element
+#         num_nodes: total number of nodes in the mesh
 
-    Returns:
-        nodal_stress: jnp.ndarray of shape (num_nodes, 3) - averaged stress per node
-    """
-    # Accumulators
-    stress_accumulator = np.zeros((num_nodes, 3), dtype=np.float32)
-    count_accumulator = np.zeros((num_nodes,), dtype=np.int32)
+#     Returns:
+#         nodal_stress: jnp.ndarray of shape (num_nodes, 3) - averaged stress per node
+#     """
+#     # Accumulators
+#     stress_accumulator = np.zeros((num_nodes, 3), dtype=np.float32)
+#     count_accumulator = np.zeros((num_nodes,), dtype=np.int32)
 
-    num_elements, num_gauss, _ = total_stress.shape
+#     num_elements, num_gauss, _ = total_stress.shape
 
-    # For each element
-    for e in range(num_elements):
-        nodes = element_nodes[e]  # (4,) node indices
-        gauss_stresses = total_stress[e]  # (4, 3)
+#     # For each element
+#     for e in range(num_elements):
+#         nodes = element_nodes[e]  # (4,) node indices
+#         gauss_stresses = total_stress[e]  # (4, 3)
 
-        # Assuming Gauss point i corresponds to node i (common in reduced integration)
-        for i in range(4):
-            node_id = nodes[i]
-            stress_accumulator[node_id] += np.array(gauss_stresses[i])
-            count_accumulator[node_id] += 1
+#         # Assuming Gauss point i corresponds to node i (common in reduced integration)
+#         for i in range(4):
+#             node_id = nodes[i]
+#             stress_accumulator[node_id] += np.array(gauss_stresses[i])
+#             count_accumulator[node_id] += 1
 
-    # Avoid divide-by-zero
-    count_accumulator[count_accumulator == 0] = 1
-    nodal_stress = stress_accumulator / count_accumulator[:, None]  # shape: (num_nodes, 3)
-    return jnp.array(nodal_stress)
+#     # Avoid divide-by-zero
+#     count_accumulator[count_accumulator == 0] = 1
+#     nodal_stress = stress_accumulator / count_accumulator[:, None]  # shape: (num_nodes, 3)
+#     return jnp.array(nodal_stress)
 
 
-def get_stress(loss_function:Loss, fe_mesh:Mesh, disp_field_vec:jnp.array, K_matrix:jnp.array):
-    element_nodes = fe_mesh.GetElementsNodes(loss_function.element_type)
-    total_control_vars = K_matrix.reshape(-1,1)
-    total_stress = loss_function.ComputeTotalStress(total_control_vars,disp_field_vec)
-    num_nodes = fe_mesh.GetNumberOfNodes()
-    nodal_stress = compute_nodal_stress_from_gauss(total_stress, element_nodes, num_nodes)
+# def get_stress(loss_function:Loss, fe_mesh:Mesh, disp_field_vec:jnp.array, K_matrix:jnp.array):
+#     element_nodes = fe_mesh.GetElementsNodes(loss_function.element_type)
+#     total_control_vars = K_matrix.reshape(-1,1)
+#     total_stress = loss_function.ComputeTotalStress(total_control_vars,disp_field_vec)
+#     num_nodes = fe_mesh.GetNumberOfNodes()
+#     nodal_stress = compute_nodal_stress_from_gauss(total_stress, element_nodes, num_nodes)
 
-    return nodal_stress.flatten()
+#     return nodal_stress.flatten()
 
+def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_field:np.array,
+                 err_sol_field:np.array, file_name:str):
+    
+    fontsize = 16
+    dir = "u"
+    N = int(topology_field.size**0.5)
+    fig, axs = plt.subplots(1, 4, figsize=(16, 4))  # Adjusted to 1 columns and 3 rows
+
+    #### first row ####
+    row, col = 0, 0
+    # Plot the morphology for the base resolution
+    im = axs[col].imshow(topology_field.reshape(N, N), cmap='viridis', aspect='equal')
+    axs[col].set_xticks([])
+    axs[col].set_yticks([])
+    axs[col].set_title(f'Elasticity Morph. {N}x{N}', fontsize=fontsize)
+    cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.ax.yaxis.labelpad = 5
+    cbar.ax.tick_params(length=5, width=1)
+    
+    row, col = 0, 1
+    # Plot ifol solution displacement field for the base resolution
+    ifol_u_base = ifol_sol_field[::2]
+    im = axs[col].imshow(ifol_u_base.reshape(N, N), cmap='coolwarm', aspect='equal')
+    axs[col].set_xticks([])
+    axs[col].set_yticks([])
+    axs[col].set_title(f'${dir}$, iFOL', fontsize=fontsize)
+    cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.ax.yaxis.labelpad = 5
+    cbar.ax.tick_params(length=5, width=1)
+
+    row, col = 0, 2
+    # Plot fe solution displacement field for the base resolution
+    hfe_u_base = hfe_sol_field[::2]
+    im = axs[col].imshow(hfe_u_base.reshape(N, N), cmap='coolwarm', aspect='equal')
+    axs[col].set_xticks([])
+    axs[col].set_yticks([])
+    axs[col].set_title(f'${dir}$, FE-NIN', fontsize=fontsize)
+    cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.ax.yaxis.labelpad = 5
+    cbar.ax.tick_params(length=5, width=1)
+
+    row, col = 0, 3
+    # Plot fe solution displacement field for the base resolution
+    u_error_base = err_sol_field[::2]
+    im = axs[col].imshow(u_error_base.reshape(N, N), cmap='coolwarm', aspect='equal')
+    axs[col].set_xticks([])
+    axs[col].set_yticks([])
+    axs[col].set_title(f'iFOL Abs. Difference ${dir}$', fontsize=fontsize)
+    cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.ax.yaxis.labelpad = 5
+    cbar.ax.tick_params(length=5, width=1)
+
+    file_path = Path(file_name)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.tight_layout()
+    plt.savefig(file_path, dpi=300)
+    print(f"Plot saved to {file_path}")
+    plt.close()
 
 
 def plot_iFOL_FE_HFE(topology_field:np.array, ifol_sol_field:np.array, fe_sol_field:np.array, hfe_sol_field:np.array,
@@ -960,3 +1024,29 @@ def clean_data(array: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         mask_array = np.ones_like(array, dtype=float)
 
     return indices, mask_array
+
+def plot_norm_iter(data,plot_name='res_norm_iter',type=None):
+
+    if type=='1':
+        plt.figure(figsize=(10,4))
+    else:
+        plt.figure(figsize=(2,4))
+    plt.plot(np.arange(len(data)), data, marker='o', color='black')
+    plt.yscale("log")
+    plt.grid(which="both", linestyle="--", linewidth=0.7, alpha=0.7)  # clearer grid
+    
+    plt.xlabel("Iteration",fontdict={"size": 16})
+    plt.xlim()
+    if type=='1':    
+        plt.ylabel("Residual norm",fontdict={"size": 16})
+    plt.ylim((1e-9,3e-1))
+    
+    # set x-axis ticks every 5
+    # plt.xticks(np.arange(0, len(data) + 1, 5))
+    
+    file_path = Path(plot_name)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(f"{file_path}.png")
+    print(f"plot saved to {file_path}")
+    plt.close()

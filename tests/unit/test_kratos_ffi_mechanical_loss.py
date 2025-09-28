@@ -6,12 +6,14 @@ import numpy as np
 from fol.tools.usefull_functions import *
 import jax
 
+
 def package_and_gpu_available():
     # Check if the fol_ffi_functions exists
     package_exists = importlib.util.find_spec("fol_ffi_functions") is not None
     # Check if at least one GPU is available
     gpu_exists = any(d.platform == "gpu" for d in jax.devices())
     return package_exists and gpu_exists
+
 
 @unittest.skipUnless(package_and_gpu_available(), "Requires fol_ffi_functions lib and a GPU")
 class TestKratosFFIMechanical3D(unittest.TestCase):

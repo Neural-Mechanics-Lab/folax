@@ -1,0 +1,9 @@
+[build-system]
+requires = ["scikit-build-core", "nanobind", "jax>=0.4.31"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fol_ffi_functions"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = ["jax"]

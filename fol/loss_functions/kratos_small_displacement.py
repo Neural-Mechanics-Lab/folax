@@ -27,6 +27,47 @@ if _HAS_FOL_FFI_LIB:
     jax.ffi.register_ffi_target("compute_elements", kr_small_displacement_element.compute_elements(), platform="CUDA")
 
 class KratosSmallDisplacement3DTetra(FiniteElementLoss):
+    """
+    Finite element formulation for 3D small-displacement problems
+    using tetrahedral elements using Kratos Multiphysics.
+
+    This class extends `FiniteElementLoss` and implements residual,
+    Jacobian, and energy computations for small-displacement elasticity
+    in 3D. Computations are accelerated with custom CUDA kernels implemented in
+    `fol_ffi_functions`.
+
+    Attributes:
+        material_settings (dict): Material parameters including
+            - "poisson_ratio" (float): Poisson's ratio of the material.
+            - "young_modulus" (float): Young’s modulus of the material.
+
+    Methods:
+        __init__(name, loss_settings, fe_mesh):
+            Initialize the loss object and check for FFI availability.
+
+        Initialize(reinitialize=False):
+            Initialize or reinitialize the FEM problem setup,
+            including material settings.
+
+        ComputeTotalEnergy(total_control_vars, total_primal_vars):
+            Compute the total strain energy for the system using nodal
+            residuals and displacements.
+
+        ComputeJacobianMatrixAndResidualVector(total_control_vars,
+                                               total_primal_vars,
+                                               transpose_jacobian=False):
+            Assemble the global Jacobian matrix and residual vector,
+            applying Dirichlet boundary conditions and using sparse COO
+            storage.
+
+    Notes:
+        - Dirichlet boundary conditions are handled by masking and
+          modifying both residuals and element Jacobians.
+        - Uses JAX's experimental sparse API for efficient global
+          stiffness matrix assembly.
+        - Requires `fol_ffi_functions` for CUDA kernels
+          (`compute_nodal_residuals`, `compute_elements`).
+    """
     @print_with_timestamp_and_execution_time
     def __init__(self, name: str, loss_settings: dict, fe_mesh: Mesh):
         if not _HAS_FOL_FFI_LIB:

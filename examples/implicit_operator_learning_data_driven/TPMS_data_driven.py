@@ -20,7 +20,7 @@ create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir, working_directory_name + ".log"))
 
 # ── dataset & mesh paths (unchanged) ─────────────────────────────────────
-PKL_PATH  = "/home/jerry/50_NIN_RESULTS/examples/paper_NIN/example_3d/ground_truth_sample_50/gt_values.pkl"
+PKL_PATH  = "/home/jerry/200_NIN_RESULTS/gt_values.pkl"
 MESH_FILE = "/home/jerry/50_NIN_RESULTS/examples/paper_NIN/example_3d/cylindrical_fine_all_sides.med"
 
 with open(PKL_PATH, "rb") as f:
@@ -92,31 +92,38 @@ fol = DataDrivenMetaImplicitParametricOperatorLearning(
 )
 
 fol.Initialize()
-# ── manual train / test / eval split ─────────────────────────────────────
+
+# ── manual train / test / eval split via blocks ──────────────────────────
 N = len(data_sets["X"])
 
-train_start_id, train_end_id = 5, 30           # [5, 30) -- 25 train samples
-eval_start_id,  eval_end_id  = 31, 40          # [31, 40) -- 9  eval  samples
-test_start_id,  test_end_id  = 40, 50          # [40, 50) -- 10 test samples
+train_blocks = [(50, 100), (130, 160)]    #mixing for better training
+eval_blocks  = [(100, 105)]              
+test_blocks  = [(105, 130), (160, 200)]   
 
-assert train_end_id <= eval_start_id <= eval_end_id <= test_start_id, \
-       "train / eval / test ranges overlap"
-assert test_end_id <= N, "ranges exceed data size"
+def blocks_to_idx(blocks):
+    return np.concatenate([np.arange(s, min(e, N)) for s, e in blocks if s < e])
 
-eval_ids = range(eval_start_id, eval_end_id)
+idx_train = np.unique(blocks_to_idx(train_blocks))
+idx_eval  = np.unique(blocks_to_idx(eval_blocks))
+idx_test  = np.unique(blocks_to_idx(test_blocks))
 
-print(f"[INFO] Train [{train_start_id}:{train_end_id})  "
-      f"Test [{test_start_id}:{test_end_id})  "
-      f"Eval {list(eval_ids)}  (N = {N})")
+# sanity: sets must be pair-wise disjoint
+if len(np.intersect1d(idx_train, idx_eval)) \
+or len(np.intersect1d(idx_train, idx_test)) \
+or len(np.intersect1d(idx_eval , idx_test)):
+    raise ValueError("train / eval / test index ranges overlap!")
+
+print(f"[INFO] Train {idx_train.shape[0]}  Eval {idx_eval.shape[0]}  "
+      f"Test {idx_test.shape[0]} samples  (N = {N})")
 
 # ── training call ───────────────────────────────────────────────────────
 fol.Train(
-    train_set=(data_sets["X"][train_start_id:train_end_id, :],
-               data_sets["U_FEM"][train_start_id:train_end_id, :]),
-    test_set =(data_sets["X"][test_start_id:test_end_id, :],
-               data_sets["U_FEM"][test_start_id:test_end_id, :]),
-    test_frequency            = 10,
-    batch_size                = 5,
+    train_set=(data_sets["X"][idx_train, :],
+               data_sets["U_FEM"][idx_train, :]),
+    test_set =(data_sets["X"][idx_test , :],
+               data_sets["U_FEM"][idx_test , :]),
+    test_frequency = 10,
+    batch_size     = 5,
     convergence_settings      = {"num_epochs": num_epochs,
                                  "relative_error": 1e-100,
                                  "absolute_error": 1e-100},
@@ -127,38 +134,29 @@ fol.Train(
 
 fol.RestoreState(restore_state_directory=f"{case_dir}/flax_train_state")
 
-
 # ── evaluation & VTU export (one file per sample) ───────────────────────
 EXPORT_VTU = True
 out_dir = os.path.join(case_dir, "tested_samples")
 os.makedirs(out_dir, exist_ok=True)
 
-for k in eval_ids:                                 # 31 … 39
-    # ── forward pass ────────────────────────────────────────────────
+for k in idx_eval:                                   # iterate eval samples
     U_pred_flat = np.array(
-        fol.Predict(data_sets["X"][k, :][None, :])   # (1, 3)
-    ).reshape(-1)                                    # (3*nodes,)
+        fol.Predict(data_sets["X"][k][None, :])
+    ).reshape(-1)
 
-    U_true_flat = data_sets["U_FEM"][k]              # (3*nodes,)
+    U_true_flat = data_sets["U_FEM"][k]
     U_pred      = U_pred_flat.reshape(-1, 3)
     U_true      = U_true_flat.reshape(-1, 3)
-    abs_err_mag = np.linalg.norm(U_pred - U_true, axis=1)  # (nodes,)
+    abs_err_mag = np.linalg.norm(U_pred - U_true, axis=1)
 
     if EXPORT_VTU:
-        # fresh mesh per sample (no point/cell sets copied)
         m = Mesh("fol_io", Path(MESH_FILE).name, str(Path(MESH_FILE).parent))
         m.Initialize()
-
-        # write vector + scalar arrays
-        m["U_FE"]    = U_true.astype(np.float32)      # (nodes,3)
-        m["U_pred"]  = U_pred.astype(np.float32)      # (nodes,3)
-        m["abs_err"] = abs_err_mag.astype(np.float32) # (nodes,)
-
-        # finalise to VTU (XML Unstructured Grid)
-        m.file_name = f"sample_{k}.vtu"
+        m["U_FE"]    = U_true.astype(np.float32)
+        m["U_pred"]  = U_pred.astype(np.float32)
+        m["abs_err"] = abs_err_mag.astype(np.float32)
+        m.file_name  = f"sample_{k}.vtu"
         m.Finalize(export_dir=out_dir, export_format="vtu")
-
         print(f"   VTU field written to {m.file_name}")
 
 print(" all VTU files saved in", out_dir)
-

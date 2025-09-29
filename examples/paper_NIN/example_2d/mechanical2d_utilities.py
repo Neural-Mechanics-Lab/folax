@@ -577,8 +577,8 @@ import jax.numpy as jnp
 
 #     return nodal_stress.flatten()
 
-def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_field:np.array,
-                 err_sol_field:np.array, file_name:str):
+def plot_iFOL_HFE(topology_field:np.ndarray, ifol_sol_field:np.ndarray, hfe_sol_field:np.ndarray,
+                 err_sol_field:np.ndarray, file_name:str, fig_titles:list[str]=[None,None,None,None]):
     
     fontsize = 16
     dir = "u"
@@ -591,7 +591,12 @@ def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_fiel
     im = axs[col].imshow(topology_field.reshape(N, N), cmap='viridis', aspect='equal')
     axs[col].set_xticks([])
     axs[col].set_yticks([])
-    axs[col].set_title(f'Elasticity Morph. {N}x{N}', fontsize=fontsize)
+    if fig_titles[0] is not None:
+        title = fig_titles[0]
+    else:
+        title = "Elasticity Morph."
+
+    axs[col].set_title(f'{title} {N}x{N}', fontsize=fontsize)
     cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
     cbar.ax.tick_params(labelsize=fontsize)
     cbar.ax.yaxis.labelpad = 5
@@ -603,7 +608,12 @@ def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_fiel
     im = axs[col].imshow(ifol_u_base.reshape(N, N), cmap='coolwarm', aspect='equal')
     axs[col].set_xticks([])
     axs[col].set_yticks([])
-    axs[col].set_title(f'${dir}$, iFOL', fontsize=fontsize)
+    if fig_titles[1] is not None:
+        title = fig_titles[1]
+    else:
+        title = "iFOL"
+
+    axs[col].set_title(f'${dir}$, {title}', fontsize=fontsize)
     cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
     cbar.ax.tick_params(labelsize=fontsize)
     cbar.ax.yaxis.labelpad = 5
@@ -615,7 +625,11 @@ def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_fiel
     im = axs[col].imshow(hfe_u_base.reshape(N, N), cmap='coolwarm', aspect='equal')
     axs[col].set_xticks([])
     axs[col].set_yticks([])
-    axs[col].set_title(f'${dir}$, FE-NIN', fontsize=fontsize)
+    if fig_titles[2] is not None:
+        title = fig_titles[2]
+    else:
+        title = "FE-NIN"
+    axs[col].set_title(f'${dir}$, {title}', fontsize=fontsize)
     cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
     cbar.ax.tick_params(labelsize=fontsize)
     cbar.ax.yaxis.labelpad = 5
@@ -627,7 +641,11 @@ def plot_iFOL_HFE(topology_field:np.array, ifol_sol_field:np.array, hfe_sol_fiel
     im = axs[col].imshow(u_error_base.reshape(N, N), cmap='coolwarm', aspect='equal')
     axs[col].set_xticks([])
     axs[col].set_yticks([])
-    axs[col].set_title(f'iFOL Abs. Difference ${dir}$', fontsize=fontsize)
+    if fig_titles[3] is not None:
+        title = fig_titles[3]
+    else:
+        title = "iFOL Abs. Difference"
+    axs[col].set_title(f'{title} ${dir}$', fontsize=fontsize)
     cbar = fig.colorbar(im, ax=axs[col], pad=0.02, shrink=0.7)
     cbar.ax.tick_params(labelsize=fontsize)
     cbar.ax.yaxis.labelpad = 5

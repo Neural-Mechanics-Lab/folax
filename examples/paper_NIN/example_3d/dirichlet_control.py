@@ -28,8 +28,6 @@ class DirichletControl3D(Control):
         if self.initialized and not reinitialize:
             return
 
-        self.boundary_node_at_right_ids = jnp.array(self.fe_mesh.GetNodeSet("right"))
-        self.boundary_node_at_top_ids = jnp.array(self.fe_mesh.GetNodeSet("top"))
         self.dirichlet_values = self.loss_function.dirichlet_values
         self.dirichlet_indices = self.loss_function.dirichlet_indices
         dirichlet_indices_dict = self.loss_function.dirichlet_indices_dict

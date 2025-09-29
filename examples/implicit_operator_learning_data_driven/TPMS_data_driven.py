@@ -75,7 +75,7 @@ hyper_network = HyperNetwork(
 )
 
 # ── single optimiser (no latent loop - no second optimiser) ─────────────
-num_epochs = 5000
+num_epochs = 10000
 main_loop_transform = optax.chain(
     optax.normalize_by_update_norm(),
     optax.adam(1e-5),

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
-import sys, os, pickle, optax, numpy as np
+import sys, os, pickle
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
+import numpy as np
+import optax
 from pathlib import Path
 
 from fol.loss_functions.regression_loss import RegressionLoss
@@ -20,8 +23,8 @@ create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir, working_directory_name + ".log"))
 
 # ── dataset & mesh paths (unchanged) ─────────────────────────────────────
-PKL_PATH  = "/home/jerry/200_NIN_RESULTS/gt_values.pkl"
-MESH_FILE = "/home/jerry/50_NIN_RESULTS/examples/paper_NIN/example_3d/cylindrical_fine_all_sides.med"
+PKL_PATH  = "C:\\Users\\kianoosht\\Access.e.v\\folax\\folax\\examples\\paper_NIN\\example_3d_data_driven\\gt_values.pkl"
+MESH_FILE = "C:\\Users\\kianoosht\\Access.e.v\\folax\\folax\\examples\\meshes\\cylindrical_fine_all_sides.med"
 
 with open(PKL_PATH, "rb") as f:
     pkl = pickle.load(f)
@@ -41,7 +44,7 @@ print(f"[INFO] Loaded {len(data_sets['X'])} samples – displacement DOF = {data
 fe_mesh = Mesh("fol_io", Path(MESH_FILE).name, str(Path(MESH_FILE).parent))
 fe_mesh.Initialize()
 
-identity_control = IdentityControl("ident_control", num_vars=3)
+identity_control = IdentityControl("ident_control", num_vars=3*fe_mesh.GetNumberOfNodes(),control_settings={})
 
 reg_loss = RegressionLoss(
     "reg_loss",

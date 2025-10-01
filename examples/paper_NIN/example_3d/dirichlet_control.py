@@ -33,16 +33,18 @@ class DirichletControl3D(Control):
         dirichlet_indices_dict = self.loss_function.dirichlet_indices_dict
 
         learning_dirichlet_indices = []
+        num_var = 0
         for dof in self.settings["learning_boundary"].keys():
             for learning_boundary_tag in self.settings["learning_boundary"][dof]:
                 learning_dirichlet_indices.append(dirichlet_indices_dict[dof][learning_boundary_tag])
+            num_var += 1
         self.learning_dirichlet_indices = np.array(learning_dirichlet_indices)
 
         self.dofs = self.loss_function.loss_settings.get("ordered_dofs")
         self.dirichlet_bc_dict = self.loss_function.loss_settings.get("dirichlet_bc_dict")
         self.dim = self.loss_function.loss_settings.get("compute_dims")
     
-        self.num_control_vars = 2  
+        self.num_control_vars = num_var  
         self.num_controlled_vars = self.fe_mesh.GetNumberOfNodes()
         self.initialized = True
 

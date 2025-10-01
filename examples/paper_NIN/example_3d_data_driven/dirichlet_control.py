@@ -42,7 +42,7 @@ class DirichletControl3D(Control):
         self.dirichlet_bc_dict = self.loss_function.loss_settings.get("dirichlet_bc_dict")
         self.dim = self.loss_function.loss_settings.get("compute_dims")
     
-        self.num_control_vars = 2  
+        self.num_control_vars = 3  
         self.num_controlled_vars = self.fe_mesh.GetNumberOfNodes()
         self.initialized = True
 

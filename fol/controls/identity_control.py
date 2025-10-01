@@ -12,17 +12,17 @@ from fol.mesh_input_output.mesh import Mesh
 
 class IdentityControl(Control):
     
-    def __init__(self,control_name: str,control_settings: dict, fe_mesh: Mesh):
+    def __init__(self,control_name: str,control_settings: dict, num_vars):
         super().__init__(control_name)
-        self.fe_mesh = fe_mesh
+        self.num_vars = num_vars
         self.settings = control_settings
 
     @print_with_timestamp_and_execution_time
     def Initialize(self,reinitialize=False) -> None:
         if self.initialized and not reinitialize:
             self.initialized = True
-        self.num_control_vars = len(self.__class__.__name__) # as a dummy
-        self.num_controlled_vars = self.fe_mesh.GetNumberOfNodes()
+        self.num_control_vars = self.num_vars
+        self.num_controlled_vars = self.num_vars
 
     @partial(jit, static_argnums=(0,))
     def ComputeControlledVariables(self,variable_vector:jnp.array):

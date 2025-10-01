@@ -43,6 +43,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                          fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
     dirichlet_control.Initialize()
+    print(dirichlet_control.num_control_vars)
+    exit()
 
     # create some random coefficients & K for training
     mean, std, n_samples = 0.2, 0.05, 200
@@ -152,7 +154,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     print(f"\ncheck...\tParametric learning: {train_settings_dict['parametric_learning']}")
     print(f"\ncheck...\ttraining sample ids: {train_start_id} -> {train_end_id}\n")
 
-    ifol_solve = False
+    ifol_solve = True
     if ifol_solve:
         ifol.Train(train_set=(train_set,),
                     test_set=(test_set,),

@@ -6,6 +6,7 @@ import numpy as np
 from fol.loss_functions.regression_loss import RegressionLoss
 from fol.controls.identity_control import IdentityControl
 from data_driven_meta_alpha_meta_implicit_parametric_operator_learning import DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning
+from data_driven_meta_implicit_parametric_operator_learning import DataDrivenMetaImplicitParametricOperatorLearning
 from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import Logger
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
@@ -42,18 +43,6 @@ dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_
 dirichlet_control.Initialize()
 
 
-# # create some random coefficients & K for training
-# n_samples = 200
-# np.random.seed(42)
-# ux_comp = np.random.uniform(low=-0.1, high=0.4, size=n_samples).reshape(-1,1)
-# uy_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-# uz_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-# coeffs_matrix = np.concatenate((ux_comp,uy_comp),axis=1)
-# K_matrix = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
-
-# ### First approach
-# # create identity control
-# identity_control = IdentityControl("ident_control",num_vars=len(mechanical_loss_3d.dirichlet_indices))
 with open(os.path.join(os.path.dirname(__file__),'ifol_output_gt/gt_values.pkl'), 'rb') as f:
     gt_dict = pickle.load(f)
 gt_fe = []
@@ -64,12 +53,10 @@ for i in range(len(gt_dict.keys())):
 gt_fe_array = np.array(gt_fe)
 coeffs_matrix = np.array(coeffs_mat)
 
-### Second approach
-
+### extend K_matrix to incorporate all dofs
 K_mat = []
 K_matrix_dirichlet = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
-print(mechanical_loss_3d.dirichlet_values)
-print(K_matrix_dirichlet[0,:])
+
 for i in range(coeffs_matrix.shape[0]):
     K_matrix_total = np.zeros(3*fe_mesh.GetNumberOfNodes())
     K_matrix_total[mechanical_loss_3d.dirichlet_indices]= K_matrix_dirichlet[i,:]
@@ -88,7 +75,7 @@ reg_loss.Initialize()
 identity_control.Initialize()
 
 # design siren NN for learning
-characteristic_length = 16
+characteristic_length = 64
 synthesizer_nn = MLP(name="regressor_synthesizer",
                     input_size=3,
                     output_size=3,
@@ -97,7 +84,7 @@ synthesizer_nn = MLP(name="regressor_synthesizer",
                                          "prediction_gain":30,
                                          "initialization_gain":1.0})
 
-latent_size = 10
+latent_size = 64
 modulator_nn = MLP(name="modulator_nn",
                    input_size=latent_size,
                    use_bias=False) 
@@ -107,19 +94,29 @@ hyper_network = HyperNetwork(name="hyper_nn",
                              coupling_settings={"modulator_to_synthesizer_coupling_mode":"one_modulator_per_synthesizer_layer"})
 
 # create fol optax-based optimizer
-num_epochs = 1000
+num_epochs = 20000
 learning_rate_scheduler = optax.linear_schedule(init_value=1e-4, end_value=1e-7, transition_steps=num_epochs)
 main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(learning_rate_scheduler))
 main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e-5))
 latent_step_optimizer = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e-5))
 
 # create fol
-fol = DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
+meta_learning = False
+if meta_learning:
+    fol = DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
                                                 loss_function=reg_loss,
                                                 flax_neural_network=hyper_network,
                                                 main_loop_optax_optimizer=main_loop_transform,
                                                 latent_step_size=1e-2,
                                                 latent_step_optax_optimizer=latent_step_optimizer,
+                                                num_latent_iterations=3)
+
+else:
+    fol = DataDrivenMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
+                                                loss_function=reg_loss,
+                                                flax_neural_network=hyper_network,
+                                                main_loop_optax_optimizer=main_loop_transform,
+                                                latent_step_size=1e-2,
                                                 num_latent_iterations=3)
 
 fol.Initialize()

@@ -43,18 +43,6 @@ dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_
 dirichlet_control.Initialize()
 
 
-# # create some random coefficients & K for training
-# n_samples = 200
-# np.random.seed(42)
-# ux_comp = np.random.uniform(low=-0.1, high=0.4, size=n_samples).reshape(-1,1)
-# uy_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-# uz_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-# coeffs_matrix = np.concatenate((ux_comp,uy_comp),axis=1)
-# K_matrix = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
-
-# ### First approach
-# # create identity control
-# identity_control = IdentityControl("ident_control",num_vars=len(mechanical_loss_3d.dirichlet_indices))
 with open(os.path.join(os.path.dirname(__file__),'ifol_output_gt/gt_values.pkl'), 'rb') as f:
     gt_dict = pickle.load(f)
 gt_fe = []
@@ -65,12 +53,10 @@ for i in range(len(gt_dict.keys())):
 gt_fe_array = np.array(gt_fe)
 coeffs_matrix = np.array(coeffs_mat)
 
-### Second approach
-
+### extend K_matrix to incorporate all dofs
 K_mat = []
 K_matrix_dirichlet = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
-print(mechanical_loss_3d.dirichlet_values)
-print(K_matrix_dirichlet[0,:])
+
 for i in range(coeffs_matrix.shape[0]):
     K_matrix_total = np.zeros(3*fe_mesh.GetNumberOfNodes())
     K_matrix_total[mechanical_loss_3d.dirichlet_indices]= K_matrix_dirichlet[i,:]

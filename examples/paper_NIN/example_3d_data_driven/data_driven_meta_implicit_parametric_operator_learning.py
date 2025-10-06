@@ -27,7 +27,7 @@ class DataDrivenMetaImplicitParametricOperatorLearning(MetaImplicitParametricOpe
         @jax.jit
         def loss(input_latent_code):
             nn_output = nn_model(input_latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-            return self.loss_function.ComputeSingleLoss(orig_features[1],nn_output)[0]
+            return self.loss_function.ComputeSingleLoss(orig_features[0],nn_output)[0]
 
         loss_latent_grad_fn = jax.grad(loss)
         for _ in range(self.num_latent_iterations):

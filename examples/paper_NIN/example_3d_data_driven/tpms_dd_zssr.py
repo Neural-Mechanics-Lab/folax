@@ -6,22 +6,23 @@ import numpy as np
 from fol.loss_functions.regression_loss import RegressionLoss
 from fol.controls.identity_control import IdentityControl
 from data_driven_meta_alpha_meta_implicit_parametric_operator_learning import DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning
+from data_driven_meta_implicit_parametric_operator_learning import DataDrivenMetaImplicitParametricOperatorLearning
 from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import Logger
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
 # from fol.data_input_output.zarr_io import ZarrIO
 from dirichlet_control import DirichletControl3D
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
+from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 import pickle
 
 # directory & save handling
-working_directory_name = 'meta_alpha_meta_implicit_operator_learning'
+working_directory_name = 'ifol_output_implicit_data_driven'
 case_dir = os.path.join('.', working_directory_name)
-create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
 #call the function to create the mesh
-fe_mesh = Mesh("fol_io","cylindrical_fine_all_sides.med",os.path.join(os.path.abspath(__file__),'../../../meshes'))
+fe_mesh = Mesh("fol_io","cylindrical_fine_all_sides.med",os.path.join(os.path.dirname(__file__),'..','..','meshes'))
 fe_mesh.Initialize()
 
 # creation of fe model and loss function
@@ -37,7 +38,7 @@ mechanical_loss_3d.Initialize()
 
 # dirichlet control
 dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}, "Uz":{"right"}}}
-dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
+dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings,
                                         fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
 dirichlet_control.Initialize()
 
@@ -54,7 +55,7 @@ dirichlet_control.Initialize()
 # ### First approach
 # # create identity control
 # identity_control = IdentityControl("ident_control",num_vars=len(mechanical_loss_3d.dirichlet_indices))
-with open('gt_values.pkl', 'rb') as f:
+with open(os.path.join(os.path.dirname(__file__),'ifol_output_gt/gt_values.pkl'), 'rb') as f:
     gt_dict = pickle.load(f)
 gt_fe = []
 coeffs_mat = []
@@ -88,7 +89,7 @@ reg_loss.Initialize()
 identity_control.Initialize()
 
 # design siren NN for learning
-characteristic_length = 16
+characteristic_length = 64
 synthesizer_nn = MLP(name="regressor_synthesizer",
                     input_size=3,
                     output_size=3,
@@ -97,24 +98,25 @@ synthesizer_nn = MLP(name="regressor_synthesizer",
                                          "prediction_gain":30,
                                          "initialization_gain":1.0})
 
-latent_size = 10
+latent_size = 64
 modulator_nn = MLP(name="modulator_nn",
                    input_size=latent_size,
-                   use_bias=False) 
-
+                   use_bias=False)
 hyper_network = HyperNetwork(name="hyper_nn",
                              modulator_nn=modulator_nn,synthesizer_nn=synthesizer_nn,
                              coupling_settings={"modulator_to_synthesizer_coupling_mode":"one_modulator_per_synthesizer_layer"})
 
 # create fol optax-based optimizer
-num_epochs = 1000
+num_epochs = 20000
 learning_rate_scheduler = optax.linear_schedule(init_value=1e-4, end_value=1e-7, transition_steps=num_epochs)
 main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(learning_rate_scheduler))
 main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e-5))
 latent_step_optimizer = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e-5))
 
 # create fol
-fol = DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
+meta_learning = False
+if meta_learning:
+    fol = DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
                                                 loss_function=reg_loss,
                                                 flax_neural_network=hyper_network,
                                                 main_loop_optax_optimizer=main_loop_transform,
@@ -122,20 +124,28 @@ fol = DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(name="meta_impli
                                                 latent_step_optax_optimizer=latent_step_optimizer,
                                                 num_latent_iterations=3)
 
+else:
+    fol = DataDrivenMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
+                                                loss_function=reg_loss,
+                                                flax_neural_network=hyper_network,
+                                                main_loop_optax_optimizer=main_loop_transform,
+                                                latent_step_size=1e-2,
+                                                num_latent_iterations=3)
+
+
 fol.Initialize()
 
 train_start_id = 0
 train_end_id = 160
-test_start_id = 160
-test_end_id = 200
+test_start_id = 150
+test_end_id = 160
 
-fol.Train(train_set=(K_matrix[train_start_id:train_end_id,:],gt_fe_array[train_start_id:train_end_id,:]),
-          test_set=(K_matrix[test_start_id:test_end_id,:],gt_fe_array[test_start_id:test_end_id,:]),
-          test_frequency=10,batch_size=5,
-          convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
-          train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-          working_directory=case_dir)
-
+# fol.Train(train_set=(K_matrix[train_start_id:train_end_id,:],gt_fe_array[train_start_id:train_end_id,:]),
+#           test_set=(K_matrix[test_start_id:test_end_id,:],gt_fe_array[test_start_id:test_end_id,:]),
+#           test_frequency=10,batch_size=5,
+#           convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
+#           train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+#           working_directory=case_dir)
 # load the best model
 fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
@@ -146,6 +156,28 @@ for eval_id in list(np.arange(test_start_id,test_end_id)):
     fe_mesh[f'U_FEM_{eval_id}'] = U_FEM.reshape((fe_mesh.GetNumberOfNodes(), 3))
     fe_mesh[f'U_iFOL_{eval_id}'] = U_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 3))
     fe_mesh[f'abs_err_{eval_id}'] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    # Compression BCs
+    updated_bc = bc_dict.copy()
+    updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix[eval_id,0]},
+                        "Uy":{"left":0.,"right":coeffs_matrix[eval_id,1]},
+                        "Uz":{"left":0.,"right":coeffs_matrix[eval_id,2]}})
+
+    updated_loss_setting = loss_settings.copy()
+    updated_loss_setting.update({"dirichlet_bc_dict":updated_bc})
+    mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
+                                                                                fe_mesh=fe_mesh)
+    mechanical_loss_3d_updated.Initialize()
+    try:
+        hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
+                "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
+                                                "maxiter":20,"load_incr":1}}
+        nonlin_hfe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,hfe_setting)
+        nonlin_hfe_solver.Initialize()
+        HFE_UVW = np.array(nonlin_hfe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),U_iFOL.reshape(3*fe_mesh.GetNumberOfNodes())))
+    except:
+        ValueError('res_norm contains nan values!')
+        HFE_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
+    fe_mesh[f'U_HFE_{eval_id}'] = HFE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
 
 fe_mesh.Finalize(export_dir=case_dir,export_format='vtu')

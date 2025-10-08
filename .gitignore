@@ -16,3 +16,4 @@ flax_state/
 py-env*
 .venv
 requirements.txt
+ifol_output*/

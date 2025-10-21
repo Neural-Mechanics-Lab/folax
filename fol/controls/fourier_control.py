@@ -46,11 +46,9 @@ class FourierControl(Control):
         self.frquencies_vec = jnp.vstack([mesh_x.ravel(), mesh_y.ravel(), mesh_z.ravel()]).T
         self.initialized = True
 
-    @partial(jit, static_argnums=(0,))
     def ComputeControlledVariables(self,variable_vector:jnp.array):
         variable_vector *= (self.scale_max-self.scale_min)
         variable_vector += self.scale_min
-        @jit
         def evaluate_at_frequencies(freqs,coeff):
             cos_x = jnp.cos(freqs[0] * jnp.pi * self.fe_mesh.GetNodesX())
             cos_y = jnp.cos(freqs[1] * jnp.pi * self.fe_mesh.GetNodesY())

@@ -21,7 +21,6 @@ class IdentityControl(Control):
         if self.initialized and not reinitialize:
             self.initialized = True
 
-    @partial(jit, static_argnums=(0,))
     def ComputeControlledVariables(self,variable_vector:jnp.array):
         return variable_vector
 

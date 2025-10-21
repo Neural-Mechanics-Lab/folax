@@ -44,7 +44,7 @@ class Loss(ABC):
         pass
 
     @abstractmethod
-    def ComputeSingleLoss(self) -> None:
+    def ComputeBatchLoss(self) -> None:
         """Computes the single loss.
 
         This method initializes the loss. This is only called once in the whole training process.

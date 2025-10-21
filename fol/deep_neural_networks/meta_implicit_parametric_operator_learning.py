@@ -87,106 +87,39 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
         
         self.latent_step = latent_step_size
         self.num_latent_iterations = num_latent_iterations
-        
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,orig_features:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        """
-        Computes the loss value for a single input using latent loop optimization.
 
-        This method calculates the loss by optimizing a latent code for the given input features. The latent code is 
-        iteratively updated using gradient descent, and the final loss is computed by comparing the neural network's 
-        output with the control output based on the loss function's non-Dirichlet indices.
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
+        latent_codes = jnp.zeros((batch_X.shape[0],nn_model.in_features))
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
 
-        Parameters
-        ----------
-        orig_features : Tuple[jnp.ndarray, jnp.ndarray]
-            A tuple containing the input features, where:
-            - The first element is used to compute control variables.
-            - The second element (if applicable) may contain additional feature data.
-        nn_model : nnx.Module
-            The neural network model used for predictions.
+        def latent_loss(latent_code,control_output):
+            nn_output = nn_model(latent_code[None, :],self.loss_function.fe_mesh.GetNodesCoordinates())
+            return self.loss_function.ComputeBatchLoss(control_output,nn_output)[0]
 
-        Returns
-        -------
-        jnp.ndarray
-            The computed loss value as a scalar.
-
-        Notes
-        -----
-        - The latent code is initialized to zeros and updated iteratively using gradient descent.
-        - The number of iterations and step size for updating the latent code are determined by the 
-        `num_latent_iterations` and `latent_step` attributes, respectively.
-        - This method uses JAX's `jit` for just-in-time compilation and `grad` for automatic differentiation 
-        to compute the gradients of the loss function with respect to the latent code.
-        """       
-        latent_code = jnp.zeros(nn_model.in_features)
-        control_output = self.control.ComputeControlledVariables(orig_features[0])
-
-        @jax.jit
-        def loss(input_latent_code):
-            nn_output = nn_model(input_latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-            return self.loss_function.ComputeSingleLoss(control_output,nn_output)[0]
-
-        loss_latent_grad_fn = jax.grad(loss)
+        vec_grad_func = jax.vmap(jax.grad(latent_loss, argnums=0))
         for _ in range(self.num_latent_iterations):
-            grads = loss_latent_grad_fn(latent_code)
-            latent_code -= self.latent_step * grads / jnp.linalg.norm(grads)
-        
-        nn_output = nn_model(latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(control_output,nn_output)
+            grads = vec_grad_func(latent_codes,control_outputs)
+            grads_norms =  jnp.linalg.norm(grads, axis=1, keepdims=True)
+            norm_grads = grads
+            latent_codes -= self.latent_step * norm_grads
+
+        return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
+
+
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})
 
     @print_with_timestamp_and_execution_time
-    def Predict(self,batch_X:jnp.ndarray):
-        """
-        Generates predictions for a batch of input data using latent loop optimization.
-
-        This method processes a batch of input features and computes predictions for each sample by:
-        1. Initializing a latent code for the input sample.
-        2. Iteratively updating the latent code using gradient descent to minimize the loss.
-        3. Using the optimized latent code to compute the neural network output.
-        4. Mapping the network's output to the full degree of freedom (DoF) vector based on the loss function.
-
-        Parameters
-        ----------
-        batch_X : jnp.ndarray
-            A batch of input features for which predictions are required.
-
-        Returns
-        -------
-        jnp.ndarray
-            A batch of predicted outputs, where each prediction corresponds to a full DoF vector.
-
-        Notes
-        -----
-        - The latent code is initialized to zeros and optimized iteratively for each input sample.
-        - The number of iterations and step size for the latent loop optimization are determined by the 
-        `num_latent_iterations` and `latent_step` attributes, respectively.
-        - JAX's `jit` and `grad` are used for just-in-time compilation and automatic differentiation 
-        to compute gradients for latent code optimization.
-        - The predictions are processed in parallel using `jax.vmap` for efficiency.
-        - This method maps the neural network's output to the full DoF vector, including both Dirichlet 
-        and non-Dirichlet indices.
-        """
-        def predict_single_sample(sample_x:jnp.ndarray):
-
-            latent_code = jnp.zeros(self.flax_neural_network.in_features)
-            control_output = self.control.ComputeControlledVariables(sample_x)
-
-            @jax.jit
-            def loss(input_latent_code):
-                nn_output = self.flax_neural_network(input_latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-                return self.loss_function.ComputeSingleLoss(control_output,nn_output)[0]
-
-            loss_latent_grad_fn = jax.grad(loss)
-            for _ in range(self.num_latent_iterations):
-                grads = loss_latent_grad_fn(latent_code)
-                latent_code -= self.latent_step * grads / jnp.linalg.norm(grads)
-
-            nn_output = self.flax_neural_network(latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-
-            return self.loss_function.GetFullDofVector(sample_x,nn_output)
-
-        return jnp.array(jax.vmap(predict_single_sample)(batch_X))
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
+    def Predict(self,batch_X):
+        return self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
     
     @print_with_timestamp_and_execution_time
     def PredictDynamics(self,initial_u:jnp.ndarray,num_steps:int):

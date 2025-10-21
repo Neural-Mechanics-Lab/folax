@@ -48,8 +48,6 @@ class Control(ABC):
         """
         pass
 
-    @print_with_timestamp_and_execution_time     
-    @partial(jit, static_argnums=(0,))
     def ComputeBatchControlledVariables(self,batch_variable_vector:jnp.array) -> None:
         """Computes the controlled variables for the given batch variables.
 

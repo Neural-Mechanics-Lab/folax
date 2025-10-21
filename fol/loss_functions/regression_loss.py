@@ -60,15 +60,14 @@ class RegressionLoss(Loss):
 
         self.initialized = True
 
-    @partial(jit, static_argnums=(0,))
     def GetFullDofVector(self,known_dofs: jnp.array,unknown_dofs: jnp.array) -> jnp.array:
         return unknown_dofs
 
     def GetNumberOfUnknowns(self) -> int:
         pass
 
-    @partial(jit, static_argnums=(0,))
-    def ComputeSingleLoss(self,gt_values:jnp.array,pred_values:jnp.array) -> tuple[float, tuple[float, float, float]]:
+    # @print_with_timestamp_and_execution_time
+    def ComputeBatchLoss(self,gt_values:jnp.array,pred_values:jnp.array) -> tuple[float, tuple[float, float, float]]:
         """
         Computes the regression loss between ground truth values and predicted values.
 
@@ -87,7 +86,6 @@ class RegressionLoss(Loss):
                 - error summary (tuple): A tuple with minimum error, maximum error, and mean error.
 
         """
-
         err = (gt_values-pred_values)**2
         return jnp.mean(err),(jnp.min(err),jnp.max(err),jnp.mean(err))
 

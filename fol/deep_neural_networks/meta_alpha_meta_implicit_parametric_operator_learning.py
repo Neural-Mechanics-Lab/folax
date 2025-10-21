@@ -88,36 +88,30 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
         self.num_latent_iterations = num_latent_iterations
         self.latent_nnx_optimizer = nnx.Optimizer(self.latent_step_nnx_model,self.latent_step_optimizer)
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,latent_and_control:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        latent_code = latent_and_control[0]
-        control_output = self.control.ComputeControlledVariables(latent_and_control[1])
-        nn_output = nn_model(latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(control_output,nn_output)
-
     def Finalize(self):
         pass
     
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeBatchLatent(self,batch_X:jnp.ndarray,flax_neural_network:nnx.Module,latent_step:nnx.Module):
-        @nnx.jit
-        def compute_single_latent(sample_x:jnp.ndarray):
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,meta_model:Tuple[nnx.Module,nnx.Module]):
 
-            latent_code = jnp.zeros(flax_neural_network.in_features)
-            control_output = self.control.ComputeControlledVariables(sample_x)
+        nn_model,latent_step = meta_model
 
-            @nnx.jit
-            def loss(input_latent_code):
-                nn_output = flax_neural_network(input_latent_code,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-                return self.loss_function.ComputeSingleLoss(control_output,nn_output)[0]
+        latent_codes = jnp.zeros((batch_X.shape[0],nn_model.in_features))
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
 
-            loss_latent_grad_fn = jax.grad(loss)
-            for _ in range(self.num_latent_iterations):
-                latent_code -= latent_step() * loss_latent_grad_fn(latent_code)
+        def latent_loss(latent_code,control_output):
+            nn_output = nn_model(latent_code[None, :],self.loss_function.fe_mesh.GetNodesCoordinates())
+            return self.loss_function.ComputeBatchLoss(control_output,nn_output)[0]
 
-            return latent_code
+        vec_grad_func = jax.vmap(jax.grad(latent_loss, argnums=0))
+        for _ in range(self.num_latent_iterations):
+            grads = vec_grad_func(latent_codes,control_outputs)
+            latent_codes -= latent_step() * grads
 
-        return jnp.array(jax.vmap(compute_single_latent)(batch_X))
+        return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
+
+    def ComputeBatchLossValue(self,batch_data:Tuple[jnp.ndarray,jnp.ndarray],meta_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_data[0])
+        return self.loss_function.ComputeBatchLoss(control_outputs,self.ComputeBatchPredictions(batch_data[0],meta_model))[0]
 
     def SaveCheckPoint(self,check_point_type,checkpoint_state_dir):
         """
@@ -197,176 +191,29 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
 
         fol_info(f"meta flax nnx state is restored from {restore_state_directory}")
 
+    def GetState(self):
+        return (self.flax_neural_network, self.nnx_optimizer, self.latent_step_nnx_model, self.latent_nnx_optimizer)
+
     @partial(nnx.jit, static_argnums=(0,))
     def TrainStep(self, meta_state, data):
         nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
-        meta_model = (nn_model,latent_step_model)
-
-        @nnx.jit
-        def compute_batch_loss(batch_X,meta_model):
-            nn_model, latent_step_model = meta_model
-            latent_codes = self.ComputeBatchLatent(batch_X,nn_model,latent_step_model)
-            return self.ComputeBatchLossValue((latent_codes,batch_X),nn_model)[0],latent_codes
-        
-        (loss_value,latent_codes),meta_grads = nnx.value_and_grad(compute_batch_loss,argnums=1,has_aux=True) (data[0],meta_model)
+        batch_loss, meta_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1) (data,(nn_model,latent_step_model))
         main_optimizer.update(meta_grads[0])
         latent_optimizer.update(meta_grads[1])
-        return loss_value
+        return batch_loss
     
     @partial(nnx.jit, static_argnums=(0,))
     def TestStep(self, meta_state, data):
         nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
-        latent_codes = self.ComputeBatchLatent(data[0],nn_model,latent_step_model)
-        return self.ComputeBatchLossValue((latent_codes,data[0]),nn_model)[0]
+        return self.ComputeBatchLossValue(data,(nn_model,latent_step_model))
 
     @print_with_timestamp_and_execution_time
-    def Train(self, 
-              train_set:Tuple[jnp.ndarray, jnp.ndarray], 
-              test_set:Tuple[jnp.ndarray, jnp.ndarray] = (jnp.array([]), jnp.array([])),
-              test_frequency:int=100, 
-              batch_size:int=100, 
-              convergence_settings:dict={}, 
-              plot_settings:dict={},
-              restore_nnx_state_settings:dict={},
-              train_checkpoint_settings:dict={},
-              test_checkpoint_settings:dict={},
-              save_nnx_state_settings:dict={},
-              working_directory='.'):
-
-        convergence_settings = UpdateDefaultDict(self.default_convergence_settings,convergence_settings)
-        fol_info(f"convergence settings:{convergence_settings}")
-
-        default_plot_settings = copy.deepcopy(self.default_plot_settings)
-        default_plot_settings["save_directory"] = working_directory
-        plot_settings = UpdateDefaultDict(default_plot_settings,plot_settings)
-        plot_settings["test_frequency"] = test_frequency
-        fol_info(f"plot settings:{plot_settings}")
-
-        default_restore_nnx_state_settings = copy.deepcopy(self.default_restore_nnx_state_settings)
-        default_restore_nnx_state_settings["state_directory"] = working_directory + "/" + default_restore_nnx_state_settings["state_directory"]
-        restore_nnx_state_settings = UpdateDefaultDict(default_restore_nnx_state_settings,restore_nnx_state_settings)
-        fol_info(f"restore settings:{restore_nnx_state_settings}")
-
-        default_train_checkpoint_settings = copy.deepcopy(self.default_train_checkpoint_settings)
-        default_train_checkpoint_settings["state_directory"] = working_directory + "/" + default_train_checkpoint_settings["state_directory"]
-        train_checkpoint_settings = UpdateDefaultDict(default_train_checkpoint_settings,train_checkpoint_settings)
-        fol_info(f"train checkpoint settings:{train_checkpoint_settings}")
-
-        default_test_checkpoint_settings = copy.deepcopy(self.default_test_checkpoint_settings)
-        default_test_checkpoint_settings["state_directory"] = working_directory + "/" + default_test_checkpoint_settings["state_directory"]
-        test_checkpoint_settings = UpdateDefaultDict(default_test_checkpoint_settings,test_checkpoint_settings)
-        fol_info(f"test checkpoint settings:{test_checkpoint_settings}")
-        
-        default_save_nnx_state_settings = copy.deepcopy(self.default_save_nnx_state_settings)
-        default_save_nnx_state_settings["final_state_directory"] = working_directory + "/" + default_save_nnx_state_settings["final_state_directory"]
-        default_save_nnx_state_settings["interval_state_checkpointing_directory"] = working_directory + "/" + default_save_nnx_state_settings["interval_state_checkpointing_directory"]
-        save_nnx_state_settings = UpdateDefaultDict(default_save_nnx_state_settings,save_nnx_state_settings)
-        fol_info(f"save nnx state settings:{save_nnx_state_settings}")
-
-        # restore state if needed 
-        if restore_nnx_state_settings['restore']:
-            self.RestoreState(restore_nnx_state_settings["state_directory"])
-
-        # adjust batch for parallization reasons
-        adjusted_batch_size = next(i for i in range(batch_size, 0, -1) if len(train_set[0]) % i == 0)   
-        if adjusted_batch_size!=batch_size:
-            fol_info(f"for the parallelization of batching, the batch size is changed from {batch_size} to {adjusted_batch_size}")   
-            batch_size = adjusted_batch_size  
-
-        train_history_dict = {"total_loss":[]}
-        test_history_dict = {"total_loss":[]}
-        pbar = trange(convergence_settings["num_epochs"])
-        converged = False
-        rng, _ = jax.random.split(jax.random.PRNGKey(0))
-        meta_state = (self.flax_neural_network, self.nnx_optimizer, self.latent_step_nnx_model, self.latent_nnx_optimizer)
-
-        # Most powerful chicken seasoning taken from https://gist.github.com/puct9/35bb1e1cdf9b757b7d1be60d51a2082b 
-        # and discussions in https://github.com/google/flax/issues/4045
-        train_multiple_steps_with_idxs = nnx.jit(lambda st, dat, idxs: nnx.scan(lambda st, idxs: (st, self.TrainStep(st, jax.tree.map(lambda a: a[idxs], dat))))(st, idxs))    
-
-        for epoch in pbar:
-            # update least values in case of restore
-            if train_checkpoint_settings["least_loss_checkpointing"] and restore_nnx_state_settings['restore'] and epoch==0:
-                train_checkpoint_settings["least_loss"] = self.TestStep(meta_state,train_set)
-            if test_checkpoint_settings["least_loss_checkpointing"] and restore_nnx_state_settings['restore'] and epoch==0:
-                test_checkpoint_settings["least_loss"] = self.TestStep(meta_state,test_set)            
-
-            # parallel batching and train step
-            rng, sub = jax.random.split(rng)
-            order = jax.random.permutation(sub, len(train_set[0])).reshape(-1, batch_size)            
-            _, losses = train_multiple_steps_with_idxs(meta_state, train_set, order)
-            train_history_dict["total_loss"].append(losses.mean())
-            
-            # test step
-            if len(test_set[0])>0 and ((epoch)%test_frequency==0 or epoch==convergence_settings["num_epochs"]-1):
-                test_history_dict["total_loss"].append(self.TestStep(meta_state,test_set))
-            
-            # print step   
-            if len(test_set[0])>0:
-                print_dict = {"train_loss":train_history_dict["total_loss"][-1],
-                              "test_loss":test_history_dict["total_loss"][-1],
-                              "latent_step":self.latent_step_nnx_model().value}
-            else:
-                print_dict = {"train_loss":train_history_dict["total_loss"][-1],
-                              "latent_step":self.latent_step_nnx_model().value}
-
-            pbar.set_postfix(print_dict)
-
-            # check converged
-            converged = self.CheckConvergence(train_history_dict,convergence_settings)
-
-            # plot the histories
-            if (epoch>0 and epoch %plot_settings["save_frequency"] == 0) or converged:
-                self.PlotHistoryDict(plot_settings,train_history_dict,test_history_dict)
-
-            # train checkpointing
-            if train_checkpoint_settings["least_loss_checkpointing"] and epoch>0 and \
-                (epoch)%train_checkpoint_settings["frequency"] == 0 and \
-                train_history_dict["total_loss"][-1] < train_checkpoint_settings["least_loss"]:
-                fol_info(f"train total_loss improved from {train_checkpoint_settings['least_loss']} to {train_history_dict['total_loss'][-1]}")
-                train_checkpoint_settings["least_loss"] = train_history_dict["total_loss"][-1]
-                self.SaveCheckPoint("train",train_checkpoint_settings["state_directory"])
-
-            # test checkpointing
-            if test_checkpoint_settings["least_loss_checkpointing"] and epoch>0 and \
-                (epoch)%test_checkpoint_settings["frequency"] == 0 and \
-                test_history_dict["total_loss"][-1] < test_checkpoint_settings["least_loss"]:
-                fol_info(f"test total_loss improved from {test_checkpoint_settings['least_loss']} to {test_history_dict['total_loss'][-1]}")
-                test_checkpoint_settings["least_loss"] = test_history_dict["total_loss"][-1]
-                self.SaveCheckPoint("test",test_checkpoint_settings["state_directory"])
-
-            # interval checkpointing
-            if save_nnx_state_settings["interval_state_checkpointing"] and epoch>0 and \
-            (epoch)%save_nnx_state_settings["interval_state_checkpointing_frequency"] == 0:
-                self.SaveCheckPoint(f"interval {epoch}",save_nnx_state_settings["interval_state_checkpointing_directory"]+"/flax_train_state_epoch_"+str(epoch))
-
-            if epoch<convergence_settings["num_epochs"]-1 and converged:
-                break          
-
-        if train_checkpoint_settings["least_loss_checkpointing"] and \
-            train_history_dict["total_loss"][-1] < train_checkpoint_settings['least_loss']:
-            fol_info(f"train total_loss improved from {train_checkpoint_settings['least_loss']} to {train_history_dict['total_loss'][-1]}")
-            self.SaveCheckPoint("train",train_checkpoint_settings["state_directory"])
-
-        if test_checkpoint_settings["least_loss_checkpointing"] and \
-            test_history_dict["total_loss"][-1] < test_checkpoint_settings['least_loss']:
-            fol_info(f"test total_loss improved from {test_checkpoint_settings['least_loss']} to {test_history_dict['total_loss'][-1]}")
-            self.SaveCheckPoint("test",test_checkpoint_settings["state_directory"])
-
-        if save_nnx_state_settings["save_final_state"]:
-            self.SaveCheckPoint("final",save_nnx_state_settings["final_state_directory"])
-
-        self.checkpointer.close()  # Close resources properly
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
+    def Predict(self,batch_X:jnp.ndarray):
+        return self.ComputeBatchPredictions(batch_X,(self.flax_neural_network,self.latent_step_nnx_model))
 
     @print_with_timestamp_and_execution_time
-    def Predict(self,batch_control:jnp.ndarray):
-        batch_X = jax.vmap(self.control.ComputeControlledVariables)(batch_control)
-        latent_codes = self.ComputeBatchLatent(batch_control,self.flax_neural_network,self.latent_step_nnx_model)
-        batch_Y =jax.vmap(self.flax_neural_network,(0,None))(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
-        batch_Y = batch_Y.reshape(latent_codes.shape[0], -1)[:,self.loss_function.non_dirichlet_indices]
-        return jax.vmap(self.loss_function.GetFullDofVector)(batch_X,batch_Y)
-
-    @print_with_timestamp_and_execution_time
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def PredictDynamics(self,initial_u:jnp.ndarray,num_steps:int):
         """
         Simulates the temporal evolution of the system over multiple time steps using latent loop optimization.

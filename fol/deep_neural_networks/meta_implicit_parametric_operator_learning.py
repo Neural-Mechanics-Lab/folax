@@ -105,7 +105,6 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
 
         return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
 
-
     def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
         control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
         batch_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
@@ -123,81 +122,15 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
         return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
 
     @print_with_timestamp_and_execution_time
-    def PredictDynamics(self,initial_u:jnp.ndarray,num_steps:int):
-        """
-        Simulates the temporal evolution of the system over multiple time steps using latent loop optimization.
+    @partial(nnx.jit, donate_argnums=(1,), static_argnums=(0,2))
+    def PredictDynamics(self,initial_Batch:jnp.ndarray,num_steps:int):
 
-        This method performs sequential predictions starting from an initial state, computing the state at each 
-        subsequent time step based on the output of the previous step. At each time step:
-        1. A latent code is initialized and optimized to minimize the loss function for the current input state.
-        2. The optimized latent code is used to generate the neural network output.
-        3. The output is mapped to the full degree of freedom (DoF) vector.
-        4. The updated DoF vector becomes the input for the next time step.
+        def step_fn(current_state, _):
+            """Compute the next state given the current state."""
+            next_state = self.Predict(current_state)
+            return next_state, next_state
 
-        Parameters
-        ----------
-        initial_u : jnp.ndarray
-            The initial condition or state of the system at time step zero. Should be a batch of input vectors.
-        
-        num_steps : int
-            The number of time steps to simulate the system forward in time.
+        _, trajectory = jax.lax.scan(step_fn, initial_Batch, None, length=num_steps)
 
-        Returns
-        -------
-        jnp.ndarray
-            An array containing the predicted system states over time.
-            The first row corresponds to the initial condition, and each subsequent row corresponds to the predicted 
-            state at the next time step. Shape is (num_steps + 1, DoF).
-
-        Notes
-        -----
-        - Latent code optimization is performed at each time step to generate an accurate prediction of the system's 
-        next state.
-        - The optimization loop uses `jax.lax.scan` to efficiently perform a fixed number of latent updates.
-        - The state update across time steps is performed using `jax.lax.scan` to enable efficient sequential processing.
-        - The function uses `jax.vmap` to enable parallel processing of batch inputs at each time step.
-        - The model implicitly learns the system dynamics by optimizing the latent representation without requiring 
-        explicit temporal modeling.
-        - The final output includes both the initial state and the predicted states across all time steps, stacked vertically.
-        """ 
-        def predict_single_step(sample_u: jnp.ndarray):
-            latent_code = jnp.zeros(self.flax_neural_network.in_features)
-            control_output = self.control.ComputeControlledVariables(sample_u)
-            @jax.jit
-            def loss(input_latent_code):
-                nn_output = self.flax_neural_network(
-                    input_latent_code, self.loss_function.fe_mesh.GetNodesCoordinates()
-                ).flatten()[self.loss_function.non_dirichlet_indices]
-                return self.loss_function.ComputeSingleLoss(control_output, nn_output)[0]
-            loss_latent_grad_fn = jax.grad(loss)
-            
-            @jax.jit
-            def update_latent(latent_code):
-                def single_update_latent_fn(state, _):
-                    grads = loss_latent_grad_fn(state)
-                    update = self.latent_step * grads / jnp.linalg.norm(grads)  
-                    return state - update, None  
-                latent_code, _ = jax.lax.scan(single_update_latent_fn, latent_code, xs=None, length=self.num_latent_iterations)
-                return latent_code
-
-            latent_code = update_latent(latent_code)           
-            @jax.jit
-            def compute_output(latent_code):
-                nn_output = self.flax_neural_network(
-                    latent_code, self.loss_function.fe_mesh.GetNodesCoordinates()
-                ).flatten()[self.loss_function.non_dirichlet_indices]
-                return self.loss_function.GetFullDofVector(sample_u, nn_output)      
-            return compute_output(latent_code)
-        
-        parallel_predict_fn = jax.vmap(predict_single_step)
-
-        def scan_fn(u, _):
-            u_next = parallel_predict_fn(u)
-            return u_next, u_next
-
-        _, dynamic_u = jax.lax.scan(scan_fn, initial_u.reshape(-1,1).T, None, length=num_steps)
-
-        return jnp.vstack((initial_u.reshape(-1,1).T,jnp.squeeze(dynamic_u)))
-
-    def Finalize(self):
-        pass
+        # Stack the initial state with the predicted trajectory
+        return jnp.vstack([jnp.expand_dims(initial_Batch, axis=0), trajectory])

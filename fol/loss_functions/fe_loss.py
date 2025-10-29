@@ -48,7 +48,7 @@ class FiniteElementLoss(Loss):
             self.dirichlet_indices = jnp.concatenate(dirichlet_indices)
             self.dirichlet_values = jnp.concatenate(dirichlet_values)
         else:
-            self.dirichlet_indices = jnp.array([])
+            self.dirichlet_indices = jnp.array([], dtype=jnp.int32)
             self.dirichlet_values = jnp.array([])
 
         all_indices = jnp.arange(number_dofs_per_node*self.fe_mesh.GetNumberOfNodes())

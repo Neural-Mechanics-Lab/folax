@@ -100,7 +100,7 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
         for _ in range(self.num_latent_iterations):
             grads = vec_grad_func(latent_codes,control_outputs)
             grads_norms =  jnp.linalg.norm(grads, axis=1, keepdims=True)
-            norm_grads = grads
+            norm_grads = grads/grads_norms
             latent_codes -= self.latent_step * norm_grads
 
         return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
@@ -119,8 +119,9 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
     @print_with_timestamp_and_execution_time
     @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def Predict(self,batch_X):
-        return self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
-    
+        preds = self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
+        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
+
     @print_with_timestamp_and_execution_time
     def PredictDynamics(self,initial_u:jnp.ndarray,num_steps:int):
         """

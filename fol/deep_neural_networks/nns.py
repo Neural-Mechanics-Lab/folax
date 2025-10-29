@@ -674,6 +674,6 @@ class HyperNetwork(nnx.Module):
     
     def __call__(self, latent_array: jax.Array,coord_matrix: jax.Array):
         if self.coupling_settings["modulator_to_synthesizer_coupling_mode"] == "one_modulator_per_synthesizer_layer":
-            return jnp.squeeze(jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nns,self.synthesizer_nn))
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nns,self.synthesizer_nn)
         else:
-            return jnp.squeeze(jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nn,self.synthesizer_nn))
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nn,self.synthesizer_nn)

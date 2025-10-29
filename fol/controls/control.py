@@ -52,7 +52,7 @@ class Control(ABC):
         """Computes the controlled variables for the given batch variables.
 
         """
-        return jnp.squeeze(jax.vmap(self.ComputeControlledVariables,(0))(batch_variable_vector))
+        return jax.vmap(self.ComputeControlledVariables,(0))(batch_variable_vector)
 
     @partial(jit, static_argnums=(0,))
     def ComputeJacobian(self,control_vec):

@@ -7,7 +7,6 @@
 from  .fe_loss import FiniteElementLoss
 import jax
 import jax.numpy as jnp
-from jax import jit
 from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
@@ -36,11 +35,10 @@ class AllenCahnLoss(FiniteElementLoss):
             if "body_foce" in self.loss_settings:
                 self.body_force = jnp.array(self.loss_settings["body_foce"])
     
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,phi_e_c,phi_e_n,body_force=0):
         phi_e_c = phi_e_c.reshape(-1,1)
         phi_e_n = phi_e_n.reshape(-1,1)
-        @jit
+
         def compute_at_gauss_point(gp_point,gp_weight):
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
             DN_DX = self.fe_element.ShapeFunctionsLocalGradients(gp_point)

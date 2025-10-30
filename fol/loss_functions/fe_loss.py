@@ -118,7 +118,6 @@ class FiniteElementLoss(Loss):
 
         self.initialized = True
 
-    @partial(jit, static_argnums=(0,))
     def GetFullDofVector(self,known_dofs: jnp.array,unknown_dofs: jnp.array) -> jnp.array:
         return self.full_dof_vector_function(known_dofs,unknown_dofs)
 
@@ -170,7 +169,6 @@ class FiniteElementLoss(Loss):
     def ComputeTotalEnergy(self,total_control_vars:jnp.array,total_primal_vars:jnp.array):
         return jnp.sum(self.ComputeElementsEnergies(total_control_vars,total_primal_vars)) 
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementJacobianIndices(self,nodes_ids:jnp.array):
         nodes_ids *= self.number_dofs_per_node
         nodes_ids += jnp.arange(self.number_dofs_per_node).reshape(-1,1)
@@ -184,7 +182,6 @@ class FiniteElementLoss(Loss):
     def ApplyDirichletBCOnDofVector(self,full_dof_vector:jnp.array,load_increment:float=1.0):
         return full_dof_vector.at[self.dirichlet_indices].set(load_increment*self.dirichlet_values)
 
-    @partial(jit, static_argnums=(0,))
     def ApplyDirichletBCOnElementResidualAndJacobian(self,
                                                      elem_res:jnp.array,
                                                      elem_jac:jnp.array,
@@ -203,7 +200,6 @@ class FiniteElementLoss(Loss):
 
         return   BC_matrix @ elem_res, BC_matrix @ elem_jac + mask_BC_matrix
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobian(self,
                                           elem_xyz:jnp.array,
                                           elem_controls:jnp.array,
@@ -227,7 +223,6 @@ class FiniteElementLoss(Loss):
 
         return self.ApplyDirichletBCOnElementResidualAndJacobian(re,ke,elem_BC,elem_mask_BC)
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobianVmapCompatible(self,element_id:jnp.integer,
                                                         elements_nodes:jnp.array,
                                                         xyz:jnp.array,
@@ -278,7 +273,7 @@ class FiniteElementLoss(Loss):
         template_elem_jac_indices = jnp.arange(0,self.adjusted_batch_size*element_matrix_size*element_matrix_size)
 
         residuals_vector = jnp.zeros((self.total_number_of_dofs))
-        @jax.jit
+
         def fill_arrays(batch_index,batch_arrays):
             glob_res_vec,elem_jac_vec = batch_arrays
 

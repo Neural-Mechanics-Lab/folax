@@ -7,7 +7,6 @@
 from  .thermal import ThermalLoss
 import jax
 import jax.numpy as jnp
-from jax import jit
 from functools import partial
 from fol.tools.decoration_functions import *
 from fol.tools.fem_utilities import *
@@ -40,12 +39,11 @@ class TransientThermalLoss(ThermalLoss):
         if self.time_integration_settings["time_step"] == None:
             fol_error("time step should be provided in the time_integration_dict ")
     
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,Te_c,Te_n,Ke):
         Te_c = Te_c.reshape(-1,1)
         Te_n = Te_n.reshape(-1,1)
         Ke = Ke.reshape(-1,1)
-        @jit
+
         def compute_at_gauss_point(gp_point,gp_weight):
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
             T_at_gauss_n = jnp.dot(N_vec.reshape(1,-1), Te_n)
@@ -74,7 +72,6 @@ class TransientThermalLoss(ThermalLoss):
         # element_weighted_residual_loss  = ((Te_n.T @ element_residuals)[0,0])
         return  0.5*Te_n.T@Se@Te_n + Te, (Me+self.time_integration_settings["time_step"]*Se)@Te_n - Me@Te_c, (Me+self.time_integration_settings["time_step"]*Se_dR)
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementEnergy(self,
                              elem_xyz:jnp.array,
                              elem_current_temps:jnp.array,
@@ -82,7 +79,6 @@ class TransientThermalLoss(ThermalLoss):
                              elem_heterogeneity:jnp.array) -> float:
         return self.ComputeElement(elem_xyz,elem_current_temps,elem_next_temps,elem_heterogeneity)[0]
     
-    @partial(jit, static_argnums=(0,))
     def ComputeElementEnergyVmapCompatible(self,
                                            element_id:jnp.integer,
                                            elements_nodes:jnp.array,
@@ -95,7 +91,6 @@ class TransientThermalLoss(ThermalLoss):
                                          nodal_next_temps[elements_nodes[element_id]],
                                          nodal_heterogeneity[elements_nodes[element_id]])
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementsEnergies(self,nodal_current_temps:jnp.array,nodal_next_temps:jnp.array):
         # parallel calculation of energies
         return jax.vmap(self.ComputeElementEnergyVmapCompatible,(0,None,None,None,None,None)) \
@@ -106,7 +101,6 @@ class TransientThermalLoss(ThermalLoss):
                         nodal_next_temps,
                         self.material_settings["k0"])
     
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobian(self,
                                           elem_xyz:jnp.array,
                                           elem_current_temps:jnp.array,
@@ -131,7 +125,6 @@ class TransientThermalLoss(ThermalLoss):
 
         return self.ApplyDirichletBCOnElementResidualAndJacobian(re,ke,elem_BC,elem_mask_BC)
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobianVmapCompatible(self,element_id:jnp.integer,
                                                         elements_nodes:jnp.array,
                                                         xyz:jnp.array,

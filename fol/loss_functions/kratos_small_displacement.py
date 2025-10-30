@@ -86,11 +86,9 @@ class KratosSmallDisplacement3DTetra(FiniteElementLoss):
         if "material_dict" in self.loss_settings.keys():
             self.material_settings = self.loss_settings["material_dict"]
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,te,body_force=0):
         fol_error(" is not implemented for KratosSmallDisplacement3DTetra!")
 
-    @partial(jit, static_argnums=(0,))
     def ComputeTotalEnergy(self,total_control_vars:jnp.array,total_primal_vars:jnp.array):
         total_primal_vars = total_primal_vars.reshape(1,-1)
         batch_size = 1
@@ -121,7 +119,7 @@ class KratosSmallDisplacement3DTetra(FiniteElementLoss):
                                                                             jnp.array([self.material_settings["poisson_ratio"],
                                                                                         self.material_settings["young_modulus"]]),
                                                                             total_primal_vars)
-        @jax.jit
+
         def Proccess(ke:jnp.array,
                      re:jnp.array,
                      elem_BC:jnp.array,
@@ -137,7 +135,7 @@ class KratosSmallDisplacement3DTetra(FiniteElementLoss):
             ke = jax.lax.switch(index, branches, None)
             return self.ApplyDirichletBCOnElementResidualAndJacobian(re,ke,elem_BC,elem_mask_BC)
 
-        @jax.jit
+
         def ProccessVmapCompatible(element_id:jnp.integer,
                                     elements_nodes:jnp.array,
                                     elements_stiffness:jnp.array,

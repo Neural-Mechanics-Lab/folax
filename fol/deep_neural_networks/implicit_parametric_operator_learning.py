@@ -123,84 +123,38 @@ class ImplicitParametricOperatorLearning(DeepNetwork):
         #     fol_error(f"the size of the input layer is {self.flax_neural_network.in_features} "\
         #               f"does not match the input size implicit/neural field which is {self.control.GetNumberOfVariables() + 3}")
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        """
-        Compute the loss value for a single data point.
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
+        return nn_model(batch_X,self.loss_function.fe_mesh.GetNodesCoordinates())
 
-        This method evaluates the neural network's output for a single input data point, 
-        applies control parameter transformations, and calculates the loss using the 
-        specified loss function. It ensures the computation focuses on relevant indices 
-        (e.g., non-Dirichlet boundary conditions) and integrates control effects.
-
-        Parameters
-        ----------
-        x_set : Tuple[jnp.ndarray, jnp.ndarray]
-            A tuple containing:
-            - The input data (jnp.ndarray): Represents the independent variables used as inputs to the model.
-            - The target labels (jnp.ndarray): Corresponding ground-truth values for the input data.
-        nn_model : nnx.Module
-            The Flax-based neural network model to evaluate.
-
-        Returns
-        -------
-        jnp.ndarray
-            The computed loss value for the given data point, encapsulating the 
-            discrepancy between model predictions and target labels, adjusted for 
-            control variables.
-        
-        Notes
-        -----
-        - The loss computation considers only the non-Dirichlet indices to exclude 
-          fixed boundary conditions from influencing the loss calculation.
-        - Control variables are computed and applied to ensure parameterized influence 
-          on the model output during the loss evaluation.
-        """
-        nn_output = nn_model(x_set[0],self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        return self.loss_function.ComputeSingleLoss(control_output,nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})
 
     @print_with_timestamp_and_execution_time
-    @partial(jit, static_argnums=(0,))
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def Predict(self,batch_X):
-        """
-        Generate predictions for a batch of input data.
+        preds = self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
+        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
 
-        This method computes the model's predictions for each sample in a batch of input data. 
-        The predictions are mapped to the full degree of freedom (DoF) vector by incorporating 
-        the loss function's non-Dirichlet indices and additional transformations.
+    @print_with_timestamp_and_execution_time
+    @partial(nnx.jit, donate_argnums=(1,), static_argnums=(0,2))
+    def PredictDynamics(self,initial_Batch:jnp.ndarray,num_steps:int):
 
-        Parameters
-        ----------
-        batch_X : jnp.ndarray
-            A 2D array representing the batch of input data, where each row corresponds 
-            to an individual input sample.
+        def step_fn(current_state, _):
+            """Compute the next state given the current state."""
+            next_state = self.Predict(current_state)
+            return next_state, next_state
 
-        Returns
-        -------
-        jnp.ndarray
-            A 2D array containing the predicted outputs for the batch, where each row represents 
-            the full DoF vector corresponding to an input sample.
+        _, trajectory = jax.lax.scan(step_fn, initial_Batch, None, length=num_steps)
 
-        Notes
-        -----
-        - For each input sample, the method computes the neural network's output, extracts the 
-          non-Dirichlet indices defined by the loss function, and reconstructs the full DoF vector.
-        - This approach ensures that predictions respect the boundary conditions or fixed values 
-          associated with Dirichlet boundaries.
-        - The method processes the batch iteratively, where each input sample is handled individually.
-
-        Raises
-        ------
-        ValueError
-            If the input batch does not have a valid shape (e.g., empty or incorrectly formatted).
-        """
-        prediction = []
-        for i in range(batch_X.shape[0]):
-            nn_output = self.flax_neural_network(batch_X[i],self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-            full_dof = self.loss_function.GetFullDofVector(batch_X[i],nn_output)
-            prediction.append(full_dof)
-        return jnp.array(prediction)
+        # Stack the initial state with the predicted trajectory
+        return jnp.vstack([jnp.expand_dims(initial_Batch, axis=0), trajectory])
 
     def Finalize(self):
         pass

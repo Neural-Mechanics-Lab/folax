@@ -105,32 +105,3 @@ class MetaImplicitParametricOperatorLearning(ImplicitParametricOperatorLearning)
 
         return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
 
-    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
-        batch_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
-        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
-        loss_name = self.loss_function.GetName()
-        return batch_loss, ({loss_name+"_min":batch_min,
-                             loss_name+"_max":batch_max,
-                             loss_name+"_avg":batch_avg,
-                             "total_loss":batch_loss})
-
-    @print_with_timestamp_and_execution_time
-    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
-    def Predict(self,batch_X):
-        preds = self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
-        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
-
-    @print_with_timestamp_and_execution_time
-    @partial(nnx.jit, donate_argnums=(1,), static_argnums=(0,2))
-    def PredictDynamics(self,initial_Batch:jnp.ndarray,num_steps:int):
-
-        def step_fn(current_state, _):
-            """Compute the next state given the current state."""
-            next_state = self.Predict(current_state)
-            return next_state, next_state
-
-        _, trajectory = jax.lax.scan(step_fn, initial_Batch, None, length=num_steps)
-
-        # Stack the initial state with the predicted trajectory
-        return jnp.vstack([jnp.expand_dims(initial_Batch, axis=0), trajectory])

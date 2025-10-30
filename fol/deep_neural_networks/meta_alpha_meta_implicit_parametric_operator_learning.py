@@ -106,9 +106,30 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
 
         return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
 
-    def ComputeBatchLossValue(self,batch_data:Tuple[jnp.ndarray,jnp.ndarray],meta_model:nnx.Module):
-        control_outputs = self.control.ComputeBatchControlledVariables(batch_data[0])
-        return self.loss_function.ComputeBatchLoss(control_outputs,self.ComputeBatchPredictions(batch_data[0],meta_model))[0]
+    def GetState(self):
+        return (self.flax_neural_network, self.nnx_optimizer, self.latent_step_nnx_model, self.latent_nnx_optimizer)
+
+    @partial(nnx.jit, static_argnums=(0,))
+    def TrainStep(self, meta_state, data):
+        nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
+
+        (batch_loss,batch_dict), meta_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1,has_aux=True) \
+                                                                    (data,(nn_model,latent_step_model))
+
+        main_optimizer.update(meta_grads[0])
+        latent_optimizer.update(meta_grads[1])
+        return batch_loss
+    
+    @partial(nnx.jit, static_argnums=(0,))
+    def TestStep(self, meta_state, data):
+        nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
+        return self.ComputeBatchLossValue(data,(nn_model,latent_step_model))[0]
+
+    @print_with_timestamp_and_execution_time
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
+    def Predict(self,batch_X:jnp.ndarray):
+        preds = self.ComputeBatchPredictions(batch_X,(self.flax_neural_network,self.latent_step_nnx_model))
+        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
 
     def SaveCheckPoint(self,check_point_type,checkpoint_state_dir):
         """
@@ -187,39 +208,3 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
         nnx.update(self.latent_step_nnx_model, restored_state)
 
         fol_info(f"meta flax nnx state is restored from {restore_state_directory}")
-
-    def GetState(self):
-        return (self.flax_neural_network, self.nnx_optimizer, self.latent_step_nnx_model, self.latent_nnx_optimizer)
-
-    @partial(nnx.jit, static_argnums=(0,))
-    def TrainStep(self, meta_state, data):
-        nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
-        batch_loss, meta_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1) (data,(nn_model,latent_step_model))
-        main_optimizer.update(meta_grads[0])
-        latent_optimizer.update(meta_grads[1])
-        return batch_loss
-    
-    @partial(nnx.jit, static_argnums=(0,))
-    def TestStep(self, meta_state, data):
-        nn_model, main_optimizer, latent_step_model, latent_optimizer = meta_state
-        return self.ComputeBatchLossValue(data,(nn_model,latent_step_model))
-
-    @print_with_timestamp_and_execution_time
-    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
-    def Predict(self,batch_X:jnp.ndarray):
-        preds = self.ComputeBatchPredictions(batch_X,(self.flax_neural_network,self.latent_step_nnx_model))
-        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
-
-    @print_with_timestamp_and_execution_time
-    @partial(nnx.jit, donate_argnums=(1,), static_argnums=(0,2))
-    def PredictDynamics(self,initial_Batch:jnp.ndarray,num_steps:int):
-
-        def step_fn(current_state, _):
-            """Compute the next state given the current state."""
-            next_state = self.Predict(current_state)
-            return next_state, next_state
-
-        _, trajectory = jax.lax.scan(step_fn, initial_Batch, None, length=num_steps)
-
-        # Stack the initial state with the predicted trajectory
-        return jnp.vstack([jnp.expand_dims(initial_Batch, axis=0), trajectory])

@@ -43,34 +43,41 @@ class FourierParametricOperatorLearning(DeepNetwork):
 
         self.initialized = True
 
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
+        batch_size = batch_X.shape[0]
+        mesh_size = int(self.loss_function.fe_mesh.GetNumberOfNodes()**0.5)
+        num_chs = int(batch_X.size/(mesh_size*mesh_size*batch_size))
+        return nn_model(batch_X.reshape(batch_size,mesh_size,mesh_size,num_chs)).reshape(batch_size,-1)
+
     @print_with_timestamp_and_execution_time
     def Predict(self,batch_control:jnp.ndarray):
-        mesh_size = int(self.loss_function.fe_mesh.GetNumberOfNodes()**0.5)
-        batch_size = batch_control.shape[0]
-        batch_X = jax.vmap(self.control.ComputeControlledVariables)(batch_control)
-        batch_X = batch_X.reshape(batch_size,mesh_size,mesh_size,1)
-        batch_Y =self.flax_neural_network(batch_X).reshape(batch_size,-1)[:,self.loss_function.non_dirichlet_indices]
-        batch_X = batch_X.reshape(batch_size,-1)
-        return jax.vmap(self.loss_function.GetFullDofVector)(batch_X,batch_Y)
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_control)
+        preds = self.ComputeBatchPredictions(control_outputs,self.flax_neural_network)
+        return self.loss_function.GetFullDofVector(batch_control,preds)
 
     def Finalize(self):
         pass
 
 class DataDrivenFourierParametricOperatorLearning(FourierParametricOperatorLearning):
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        mesh_size = int(self.loss_function.fe_mesh.GetNumberOfNodes()**0.5)
-        control_output = control_output.reshape(1,mesh_size,mesh_size,1)
-        nn_output = nn_model(control_output).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(x_set[1],nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(batch[1],batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})
     
 class PhysicsInformedFourierParametricOperatorLearning(FourierParametricOperatorLearning):
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        mesh_size = int(self.loss_function.fe_mesh.GetNumberOfNodes()**0.5)
-        nn_output = nn_model(control_output.reshape(1,mesh_size,mesh_size,1)).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(control_output.flatten(),nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})

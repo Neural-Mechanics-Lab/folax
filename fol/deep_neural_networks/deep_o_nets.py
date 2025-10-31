@@ -59,13 +59,17 @@ class DeepONet(nnx.Module):
         """
         return self.name
     
-    def __call__(self, branch_input: jax.Array,trunk_input: jax.Array):
+    def __call__(self, batch_branch_input: jax.Array,trunk_input: jax.Array):
 
-        branch_output = self.branch_nn(branch_input)
-        trunk_output = self.act_func(self.trunk_nn(trunk_input))
+        def single_predict(branch_input,trunk_input):
 
-        batch_size = trunk_output.shape[0]
-        reshaped_trunk = trunk_output.reshape(batch_size, self.output_dimension, self.dot_prod_vector_size)
-        reshaped_branch = branch_output.reshape(self.output_dimension, self.dot_prod_vector_size)
+            branch_output = self.branch_nn(branch_input)
+            trunk_output = self.act_func(self.trunk_nn(trunk_input))
 
-        return self.output_scale_factor * (jnp.einsum('bod,od->bo', reshaped_trunk, reshaped_branch) + self.output_bias)
+            batch_size = trunk_output.shape[0]
+            reshaped_trunk = trunk_output.reshape(batch_size, self.output_dimension, self.dot_prod_vector_size)
+            reshaped_branch = branch_output.reshape(self.output_dimension, self.dot_prod_vector_size)
+
+            return self.output_scale_factor * (jnp.einsum('bod,od->bo', reshaped_trunk, reshaped_branch) + self.output_bias)
+
+        return jax.vmap(single_predict,in_axes=(0, None))(batch_branch_input,trunk_input)

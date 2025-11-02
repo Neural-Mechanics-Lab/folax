@@ -1,9 +1,6 @@
 import pytest
 import unittest 
-import os,sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
-import jax
-jax.config.update('jax_enable_x64',True)
+import os
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra

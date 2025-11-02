@@ -22,7 +22,7 @@ The most recent improvement to the Folax repository includes the addition of a c
 
 #### Environment Configuration
 - **Deterministic XLA Operations**: Configured with `XLA_FLAGS` to ensure reproducible results
-- **GPU Determinism**: Set up deterministic operations for consistent benchmarking
+- **GPU Determinism**: Set up deterministic operations for consistent benchmarking.
 - Disabled GPU autotuning to maintain consistency across runs
 
 #### Four Training Loop Implementations Benchmarked

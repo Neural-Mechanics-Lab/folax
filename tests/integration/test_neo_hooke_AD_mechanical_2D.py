@@ -6,7 +6,7 @@ import jax
 import os,sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),'..','..')))
 import numpy as np
-from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
+from fol.loss_functions.mechanical_neohooke_AD import NeoHookeMechanicalLoss2DQuad
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.controls.fourier_control import FourierControl
 from fol.deep_neural_networks.explicit_parametric_operator_learning import ExplicitParametricOperatorLearning
@@ -20,7 +20,7 @@ class TestMechanicalNL2D(unittest.TestCase):
 
     def setUp(self):
         # problem setup
-        test_name = 'test_mechanical_NL_2D'
+        test_name = 'test_mechanical_NL_2D_AD'
         self.test_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), test_name)
         create_clean_directory(self.test_directory)
 

@@ -554,7 +554,7 @@ class NeoHookianModel2DAD(MaterialModel):
             C = self.VoigtToTensor(C_voigt)
             J = jnp.sqrt(jnp.linalg.det(C))
             return 0.5*mu*(jnp.linalg.trace(C) - 2) - mu*jnp.log(J) + 0.5*lambda_*(jnp.log(J)**2)
-            # return 0.5*mu*((J**(-1))*jnp.linalg.trace(C) - 2) - mu*jnp.log(J) + 0.5*lambda_*(jnp.log(J)**2)
+
         
         def strain_energy_paper(C_voigt):
             C = self.VoigtToTensor(C_voigt)

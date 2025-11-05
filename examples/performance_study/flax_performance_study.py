@@ -30,7 +30,7 @@ def train_step(model, optimizer, metrics, x, y):
     return ((y_pred - y) ** 2).mean()
 
   loss, grads = nnx.value_and_grad(loss_fn)(model)
-  optimizer.update(grads)  # in-place updates
+  optimizer.update(model,grads)  # in-place updates
   metrics.update(loss=loss)
 
   return loss
@@ -73,7 +73,7 @@ def jax_train_step(graphdef, state, x, y):
     return ((y_pred - y) ** 2).mean()
 
   loss, grads = nnx.value_and_grad(loss_fn)(model)
-  optimizer.update(grads)
+  optimizer.update(model,grads)
   metrics.update(loss=loss)
 
   state = nnx.state((model, optimizer, metrics))
@@ -100,7 +100,7 @@ def optimized_nnx_train_step(state, data):
     y_pred = model(x)
     return ((y_pred - y) ** 2).mean()
   loss, grads = nnx.value_and_grad(loss_fn)(model)
-  optimizer.update(grads)
+  optimizer.update(model,grads)
   metrics.update(loss=loss)
   return loss
 

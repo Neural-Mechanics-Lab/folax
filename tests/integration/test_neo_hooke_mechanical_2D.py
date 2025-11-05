@@ -3,8 +3,7 @@ import unittest
 import optax
 from flax import nnx     
 import jax 
-import os,sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),'..','..')))
+import os
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver

@@ -188,7 +188,7 @@ class MLP(nnx.Module):
         key = random.PRNGKey(0)
         keys = random.split(key, len(layer_sizes) - 1)
 
-        self.nn_params = []
+        self.nn_params = nnx.List([])
         self.total_num_weights = 0
         self.total_num_biases = 0
         for i, (in_dim, out_dim) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):

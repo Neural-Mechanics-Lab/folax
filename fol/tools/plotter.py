@@ -592,35 +592,5 @@ class Plotter2D(Plotter3D):
         print(f"[Plotter2D] overview saved → {out}")
 
 
-# ----------------------------------------------------------------------
-# Utility: solver convergence plot 
-# ----------------------------------------------------------------------
-
-def plot_solver_convergence(residual_norms_history, save_path=None, show=False):
-    """
-    Plots the nonlinear solver residual norm vs. iteration for each sample.
-
-    Args:
-        residual_norms_history: List of lists, each containing the residual norms for a sample.
-        save_path: If given, the plot is saved to this path.
-        show: If True, the plot is displayed.
-    """
-    plt.figure(figsize=(8, 6))
-    for idx, residual_norms in enumerate(residual_norms_history):
-        plt.semilogy(residual_norms, '-o', label=f"Sample {idx}")
-    plt.xlabel("Iteration number", fontsize=12)
-    plt.ylabel("Residual norm (log scale)", fontsize=12)
-    plt.title("Nonlinear Solver Convergence (Neo-Hookean)", fontsize=14)
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=300)
-        print(f"Convergence plot saved to: {save_path}")
-    if show:
-        plt.show()
-    plt.close()
-
-
 
 

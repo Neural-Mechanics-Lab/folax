@@ -94,14 +94,14 @@ class ExplicitParametricOperatorLearning(DeepNetwork):
                       f" does not match the size of unknowns of the loss function {self.loss_function.GetNumberOfUnknowns()}")
 
     def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
-        return nn_model(batch_X).reshape(batch_X.shape[0],-1)
+        return nn_model(batch_X)
     
     def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
         control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
         batch_unknowns_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
         batch_full_pred = jnp.zeros((batch[0].shape[0],self.loss_function.GetTotalNumberOfDOFs()))
         batch_full_pred = batch_full_pred.at[:,self.loss_function.non_dirichlet_indices].set(batch_unknowns_predictions)
-        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(batch[0],batch_full_pred)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_full_pred)
         loss_name = self.loss_function.GetName()
         return batch_loss, ({loss_name+"_min":batch_min,
                              loss_name+"_max":batch_max,

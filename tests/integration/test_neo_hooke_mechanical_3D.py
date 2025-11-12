@@ -89,7 +89,7 @@ class TestNeoHookeMechanical3D(unittest.TestCase):
                        convergence_settings={"num_epochs":1000,"relative_error":1e-12,"absolute_error":1e-12},
                        working_directory=self.test_hexa_directory)
         U_FOL = np.array(fol.Predict(coeffs_matrix.reshape(-1,1).T)).reshape(-1)
-        U_FEM = np.array(nonlinear_fe_solver.Solve(K_matrix,np.zeros(U_FOL.shape)))
+        U_FEM = np.array(nonlinear_fe_solver.Solve(K_matrix.flatten(),np.zeros(U_FOL.shape)))
         l2_error = 100 * np.linalg.norm(U_FOL-U_FEM,ord=2)/ np.linalg.norm(U_FEM,ord=2)
         self.assertLessEqual(l2_error, 10)
 
@@ -152,7 +152,7 @@ class TestNeoHookeMechanical3D(unittest.TestCase):
                        convergence_settings={"num_epochs":1000,"relative_error":1e-12,"absolute_error":1e-12},
                        working_directory=self.test_tetra_directory)
         U_FOL = np.array(fol.Predict(coeffs_matrix.reshape(-1,1).T)).reshape(-1)
-        U_FEM = np.array(nonlinear_fe_solver.Solve(K_matrix,np.zeros(U_FOL.shape)))
+        U_FEM = np.array(nonlinear_fe_solver.Solve(K_matrix.flatten(),np.zeros(U_FOL.shape)))
         l2_error = 100 * np.linalg.norm(U_FOL-U_FEM,ord=2)/ np.linalg.norm(U_FEM,ord=2)
         self.assertLessEqual(l2_error, 10)
 

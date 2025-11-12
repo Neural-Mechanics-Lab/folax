@@ -83,7 +83,7 @@ class TestMechanicalPoly2D(unittest.TestCase):
                         working_directory=self.test_directory)
         
         UV_FOL = np.array(self.fol.Predict(self.coeffs_matrix[-1,:].reshape(-1,1).T)).reshape(-1)
-        UV_FEM = np.array(self.fe_solver.Solve(self.K_matrix,np.zeros(UV_FOL.shape)))
+        UV_FEM = np.array(self.fe_solver.Solve(self.K_matrix.flatten(),np.zeros(UV_FOL.shape)))
         l2_error = 100 * np.linalg.norm(UV_FOL-UV_FEM,ord=2)/ np.linalg.norm(UV_FEM,ord=2)
         self.assertLessEqual(l2_error, 10)    
 

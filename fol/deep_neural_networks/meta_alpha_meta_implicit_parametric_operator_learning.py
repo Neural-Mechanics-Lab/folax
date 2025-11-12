@@ -86,7 +86,7 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
         self.latent_step_optimizer = latent_step_optax_optimizer
         self.latent_step_nnx_model = LatentStepModel(latent_step_size)
         self.num_latent_iterations = num_latent_iterations
-        self.latent_nnx_optimizer = nnx.Optimizer(self.latent_step_nnx_model,self.latent_step_optimizer)
+        self.latent_nnx_optimizer = nnx.Optimizer(self.latent_step_nnx_model,self.latent_step_optimizer,wrt=nnx.Param)
     
     def ComputeBatchPredictions(self,batch_X:jnp.ndarray,meta_model:Tuple[nnx.Module,nnx.Module]):
 
@@ -116,8 +116,8 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
         (batch_loss,batch_dict), meta_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1,has_aux=True) \
                                                                     (data,(nn_model,latent_step_model))
 
-        main_optimizer.update(meta_grads[0])
-        latent_optimizer.update(meta_grads[1])
+        main_optimizer.update(nn_model,meta_grads[0])
+        latent_optimizer.update(latent_step_model,meta_grads[1])
         return batch_loss
     
     @partial(nnx.jit, static_argnums=(0,))

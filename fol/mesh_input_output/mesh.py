@@ -193,7 +193,7 @@ class Mesh(ABC):
         f.seek(pos)
 
         nodes_data = np.fromfile(f, count=num_nodes * 4, sep=" ").reshape((num_nodes, 4))
-        self.nodes_coordinates = nodes_data[:, 1:] * self.scale_factor
+        self.nodes_coordinates = jnp.array(nodes_data[:, 1:] * self.scale_factor)
         self.node_ids = jnp.arange(len(self.nodes_coordinates))
 
     def __ReadKratosElements(self, f, environ=None):

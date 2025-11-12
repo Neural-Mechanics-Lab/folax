@@ -39,8 +39,8 @@ class DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning(MetaAlphaMetaImp
             return self.ComputeBatchLossValue((latent_codes,batch_XY[1]),nn_model)[0],latent_codes
         
         (loss_value,latent_codes),meta_grads = nnx.value_and_grad(compute_batch_loss,argnums=1,has_aux=True) (data,meta_model)
-        main_optimizer.update(meta_grads[0])
-        latent_optimizer.update(meta_grads[1])
+        main_optimizer.update(nn_model,meta_grads[0])
+        latent_optimizer.update(latent_step_model,meta_grads[1])
         return loss_value
     
     @partial(nnx.jit, static_argnums=(0,))

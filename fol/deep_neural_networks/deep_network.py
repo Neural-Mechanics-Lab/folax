@@ -97,7 +97,7 @@ class DeepNetwork(ABC):
         self.checkpointer = ocp.StandardCheckpointer()
 
         # initialize the nnx optimizer
-        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer)
+        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer, wrt=nnx.Param)
 
     def GetName(self) -> str:
         """
@@ -138,7 +138,7 @@ class DeepNetwork(ABC):
         nn, opt = state
         (_,batch_dict), batch_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1,has_aux=True) \
                                                                     (data,nn)
-        opt.update(batch_grads)
+        opt.update(nn,batch_grads)
         return batch_dict["total_loss"]
     
     @partial(nnx.jit, static_argnums=(0,))

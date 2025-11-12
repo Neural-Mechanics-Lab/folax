@@ -7,6 +7,7 @@ from  .fe_loss import FiniteElementLoss
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax import jit
 from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
@@ -22,7 +23,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         self.v = self.loss_settings["material_dict"]["poisson_ratio"]  
         
         if self.dim == 2:
-            self.material_model = NeoHookianModel2D()
+            self.material_model = NeoHookianModel2DAD()
             self.CalculateNMatrix = self.CalculateNMatrix2D
             self.CalculateKinematics = self.CalculateKinematics2D
             if self.element_type == "quad":
@@ -34,7 +35,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
                 self.body_force = jnp.array(self.loss_settings["body_foce"])
         
         if self.dim == 3:
-            self.material_model = NeoHookianModel()
+            self.material_model = NeoHookianModelAD()
             self.CalculateNMatrix = self.CalculateNMatrix3D
             self.CalculateKinematics = self.CalculateKinematics3D   
             if self.element_type == "tetra":
@@ -45,6 +46,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         if "body_foce" in self.loss_settings:
                 self.body_force = jnp.array(self.loss_settings["body_foce"])     
 
+    @partial(jit, static_argnums=(0,))
     def CalculateKinematics2D(self,DN_DX_T:jnp.array,uve:jnp.array) -> jnp.array:
         num_nodes = DN_DX_T.shape[1]
         uveT = jnp.array([uve[::2].squeeze(),uve[1::2].squeeze()]).T
@@ -60,6 +62,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         B = B.at[2, 2 * indices + 1].set(F[1, 1] * DN_DX_T[0, indices] + F[1, 0] * DN_DX_T[1, indices])
         return H,F,B
     
+    @partial(jit, static_argnums=(0,))
     def CalculateKinematics3D(self,DN_DX_T:jnp.array,uvwe:jnp.array) -> jnp.array:
         num_nodes = DN_DX_T.shape[1]
         uvweT = jnp.array([uvwe[::3].squeeze(),uvwe[1::3].squeeze(),uvwe[2::3].squeeze()]).T
@@ -89,6 +92,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
 
         return H,F,B
     
+    @partial(jit, static_argnums=(0,))
     def CalculateNMatrix2D(self,N_vec:jnp.array) -> jnp.array:
         N_mat = jnp.zeros((2, 2 * N_vec.size))
         indices = jnp.arange(N_vec.size)   
@@ -96,6 +100,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         N_mat = N_mat.at[1, 2 * indices + 1].set(N_vec)    
         return N_mat
     
+    @partial(jit, static_argnums=(0,))
     def CalculateNMatrix3D(self,N_vec:jnp.array) -> jnp.array:
         N_mat = jnp.zeros((3,3*N_vec.size))
         N_mat = N_mat.at[0,0::3].set(N_vec)
@@ -103,6 +108,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         N_mat = N_mat.at[2,2::3].set(N_vec)
         return N_mat
    
+    @partial(jit, static_argnums=(0,))
     def CalculateQuadGeometricStiffness2D(self,DN_DX_T:jnp.array,S:jnp.array) -> jnp.array:
         """
         Compute the geometric stiffness matrix for a quadratic element.
@@ -135,6 +141,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
 
         return gp_geo_stiffness
     
+    @partial(jit, static_argnums=(0,))
     def CalculateTriangleGeometricStiffness2D(self,DN_DX_T:jnp.array,S:jnp.array) -> jnp.array:
         """
         Compute the geometric stiffness matrix for a triangle element.
@@ -167,6 +174,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
 
         return gp_geo_stiffness
     
+    @partial(jit, static_argnums=(0,))
     def CalculateTetraGeometricStiffness3D(self,DN_DX_T:jnp.array,S:jnp.array) -> jnp.array:
         """
         Compute the geometric stiffness matrix for a tetra element.
@@ -203,6 +211,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         
         return gp_geo_stiffness
     
+    @partial(jit, static_argnums=(0,))
     def CalculateHexaGeometricStiffness3D(self,DN_DX_T:jnp.array,S:jnp.array) -> jnp.array:
         """
         Compute the geometric stiffness matrix for a hexahedral element.
@@ -239,8 +248,9 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
         
         return gp_geo_stiffness
     
+    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,uvwe):
-
+        @jit
         def compute_at_gauss_point(gp_point,gp_weight):
 
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
@@ -252,18 +262,25 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
             e_at_gauss = jnp.dot(N_vec, de.squeeze())
             k_at_gauss = e_at_gauss / (3 * (1 - 2*self.v))
             mu_at_gauss = e_at_gauss / (2 * (1 + self.v))
+            lambda_at_gauss = e_at_gauss*self.v/((1+self.v)*(1-2*self.v))
 
-            H,F,B = self.CalculateKinematics(DN_DX_T,uvwe)
-            xsi,S,C = self.material_model.evaluate(F,k_at_gauss,mu_at_gauss)
-            gp_geo_stiffness = self.CalculateGeometricStiffness(DN_DX_T,S)
+            def residual(uvwe):
+                _,F,B = self.CalculateKinematics(DN_DX_T,uvwe)
+                c = jnp.dot(F.T,F)
+                _,S,_ = self.material_model.evaluate(c,k=k_at_gauss,mu=mu_at_gauss,lambda_=lambda_at_gauss)
+                return jnp.dot(B.T,S)
             
+            dres_du_fn = jax.jacfwd(residual)
+
+            _,F,_ = self.CalculateKinematics(DN_DX_T,uvwe)
+            c = jnp.dot(F.T,F)
+            xsi,_,_ = self.material_model.evaluate(c,k=k_at_gauss,mu=mu_at_gauss,lambda_=lambda_at_gauss)
             
-            gp_stiffness = gp_weight * detJ * (B.T @ C @ B)
-            gp_geo_stiffness = gp_weight * detJ * gp_geo_stiffness  # will be added to gp_stiffness
+            gp_stiffness = gp_weight * detJ * dres_du_fn(uvwe).squeeze()
             gp_f = gp_weight * detJ * N_mat.T @ self.body_force
-            gp_fint = gp_weight * detJ * jnp.dot(B.T,S)
+            gp_fint = gp_weight * detJ * residual(uvwe)
             gp_energy = gp_weight * detJ * xsi
-            return gp_energy,gp_stiffness + gp_geo_stiffness,gp_f,gp_fint
+            return gp_energy,gp_stiffness ,gp_f,gp_fint
 
         gp_points,gp_weights = self.fe_element.GetIntegrationData()
         E_gps,k_gps,f_gps,fint_gps = jax.vmap(compute_at_gauss_point,in_axes=(0,0))(gp_points,gp_weights)

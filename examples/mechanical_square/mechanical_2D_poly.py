@@ -111,11 +111,11 @@ def main(fol_num_epochs=10,solve_FE=False,clean_dir=False):
 
         vectors_list = [K_matrix[eval_id],FE_UV[::2],FOL_UV[::2]]
         plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_U.png'),dir="U")
-        plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_U.png'), loss_settings=material_dict)
+        # plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_U.png'), loss_settings=material_dict)
         
         vectors_list = [K_matrix[eval_id],FE_UV[1::2],FOL_UV[1::2]]
         plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_V.png'),dir="V")
-        plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_V.png'), loss_settings=material_dict)
+        # plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_V.png'), loss_settings=material_dict)
         
     
     fe_mesh.Finalize(export_dir=case_dir)

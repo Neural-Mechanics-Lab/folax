@@ -62,6 +62,7 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                 else:
                     fol_info(f"iteration:{i+1},delta_norm:{delta_norm},residuals_norm:{res_norm}")
             current_dofs = current_dofs.at[self.fe_loss_function.non_dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.non_dirichlet_indices])
+            current_dofs = current_dofs.at[self.fe_loss_function.dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.dirichlet_indices])
         return applied_BC_dofs
 
 

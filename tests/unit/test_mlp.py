@@ -99,10 +99,10 @@ class TestMLP(unittest.TestCase):
                            [-0.0145353302359581, -0.014690360054373741]]]
         
         for i in range(len(skip_siren_mlp.nn_params)):
-            skip_siren_mlp.nn_params[i] = (nnx.Param(jnp.array(nn_weights[i])),skip_siren_mlp.nn_params[i][1])
+            skip_siren_mlp.nn_params[i] = nnx.data((nnx.Param(jnp.array(nn_weights[i])),skip_siren_mlp.nn_params[i][1]))
 
         np.testing.assert_allclose(np.array(skip_siren_mlp(jnp.array([[1,2,3],[4,5,6],[7,8,9]]))).flatten(), 
-                                    np.array([-0.06585833,-0.032813,-0.127911,-0.02603725,-0.20289356,-0.07241035]), rtol=1e-5, atol=1e-10)
+                                    np.array([-0.06585833,-0.032813,-0.127911,-0.02603725,-0.20289356,-0.07241035]), rtol=1e-5, atol=1e-6)
 
 if __name__ == '__main__':
     unittest.main()

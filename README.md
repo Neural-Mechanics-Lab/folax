@@ -36,6 +36,40 @@ If you would like to do development in folax, please first clone the repo and in
 
 ``pip install -e .[cuda,dev]``
 
+### Docker installation
+To use folax in a Docker container, you can build and run the container as follows:
+
+1. **Build the Docker image:**
+   ```bash
+   docker build -t folax-runner .
+   ```
+
+2. **Run the container with the project mounted:**
+   ```bash
+   docker run -d --name folax-setup -v $(pwd):/workspace/folax folax-runner tail -f /dev/null
+   ```
+
+3. **Create virtual environment and install dependencies:**
+   ```bash
+   docker exec folax-setup bash -c "cd /workspace/folax && uv python install 3.12 && uv venv --python 3.12 --clear .venv && uv sync"
+   ```
+
+4. **Run your scripts inside the container:**
+   ```bash
+   docker exec folax-setup bash -c "cd /workspace/folax && source .venv/bin/activate && python your_script.py"
+   ```
+
+   Or get an interactive shell:
+   ```bash
+   docker exec -it folax-setup bash
+   ```
+
+5. **Stop and remove the container when done:**
+   ```bash
+   docker stop folax-setup
+   docker rm folax-setup
+   ```
+
 ## Contributing
 If you would like to contribute to the project, please open a pull request with small changes. If you would like to see big changes in the source code, please open an issue or discussion so we can start a conversation.
 

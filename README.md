@@ -37,39 +37,27 @@ If you would like to do development in folax, please first clone the repo and in
 ``pip install -e .[cuda,dev]``
 
 ### Docker installation
-To use folax in a Docker container, you can build and run the container as follows:
+To use folax in a Docker container, you can pull and run the container as follows:
 
-1. **Build the Docker image:**
+1. **Pull the Docker image:**
    ```bash
-   docker build -t folax-runner .
+   docker pull carlosmenke/folax-runner:latest
    ```
 
-2. **Run the container with the project mounted:**
+2. **Create virtual environment with dependencies:**
    ```bash
-   docker run -d --name folax-setup -v $(pwd):/workspace/folax folax-runner tail -f /dev/null
+   docker run --rm -v $(pwd):/workspace/folax carlosmenke/folax-runner:latest bash -c "cd /workspace/folax && uv python install 3.12 && uv venv --python 3.12 --clear .venv && uv sync"
    ```
 
-3. **Create virtual environment and install dependencies:**
+3. **Run your scripts:**
    ```bash
-   docker exec folax-setup bash -c "cd /workspace/folax && uv python install 3.12 && uv venv --python 3.12 --clear .venv && uv sync"
-   ```
-
-4. **Run your scripts inside the container:**
-   ```bash
-   docker exec folax-setup bash -c "cd /workspace/folax && source .venv/bin/activate && python your_script.py"
+   docker run --rm -v $(pwd):/workspace/folax carlosmenke/folax-runner:latest bash -c "cd /workspace/folax && source .venv/bin/activate && python your_script.py"
    ```
 
    Or get an interactive shell:
    ```bash
-   docker exec -it folax-setup bash
+   docker run --rm -it -v $(pwd):/workspace/folax carlosmenke/folax-runner:latest bash
    ```
-
-5. **Stop and remove the container when done:**
-   ```bash
-   docker stop folax-setup
-   docker rm folax-setup
-   ```
-
 ## Contributing
 If you would like to contribute to the project, please open a pull request with small changes. If you would like to see big changes in the source code, please open an issue or discussion so we can start a conversation.
 

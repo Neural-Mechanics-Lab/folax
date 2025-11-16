@@ -588,7 +588,7 @@ def plot_norm_iter(data,plot_name='res_norm_iter',type=None):
     plt.xlim()
     if type=='1':    
         plt.ylabel("Residual norm",fontdict={"size": 16})
-    # plt.ylim((1e-7,3e3))
+    plt.ylim((1e-9,3e-1))
     
     # # set x-axis ticks every 5
     # plt.xticks(np.arange(0, len(data) + 1, 5))

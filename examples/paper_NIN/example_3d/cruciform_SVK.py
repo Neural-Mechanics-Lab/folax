@@ -1,11 +1,11 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
 import numpy as np
-from fol.loss_functions.mechanical_saint_venant import SaintVenantMechanicalLossLoss3DTetra
+from fol.loss_functions.mechanical_saint_venant import SaintVenantMechanicalLoss3DTetra
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.mesh_input_output.mesh import Mesh
-from dirichlet_control import DirichletControl3D
+from fol.controls.dirichlet_control import DirichletControl
 from fol.deep_neural_networks.meta_alpha_meta_implicit_parametric_operator_learning import MetaAlphaMetaImplicitParametricOperatorLearning
 from fol.deep_neural_networks.meta_implicit_parametric_operator_learning import MetaImplicitParametricOperatorLearning
 from fol.tools.usefull_functions import *
@@ -18,13 +18,13 @@ from mechanical3d_utilities import *
 
 def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "3D_tetra_cruciform_SVK_zssr_I"
+    working_directory_name = "ifol_output_3D_tetra_cruciform_SVK_train"
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     #call the function to create the mesh
-    fe_mesh = Mesh("fol_io","cruciform_zssr_I_v2.med",os.path.join('.','../meshes'))
+    fe_mesh = Mesh("fol_io","cruciform_fine.med",os.path.join('.','..','..','meshes'))
     fe_mesh.Initialize()
 
     # creation of fe model and loss function
@@ -33,14 +33,14 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                 "Uz":{"left":0.0,"right":0.0, "top":0.0, "bottom":0.0}}
     material_dict = {"young_modulus":1,"poisson_ratio":0.3}
     loss_settings = {"dirichlet_bc_dict":bc_dict,"parametric_boundary_learning":True,"material_dict":material_dict}
-    mechanical_loss_3d = SaintVenantMechanicalLossLoss3DTetra("mechanical_loss_3d",loss_settings=loss_settings,
+    mechanical_loss_3d = SaintVenantMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=loss_settings,
                                                                                    fe_mesh=fe_mesh)
     mechanical_loss_3d.Initialize()
 
     
     # dirichlet control
     dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"top"}}}
-    dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
+    dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                          fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
     dirichlet_control.Initialize()
 
@@ -133,7 +133,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     
     train_settings_dict = {"batch_size": 100,
                             "num_epoch":ifol_num_epochs,
-                            "parametric_learning": True,
+                            "parametric_learning": False,
                             "OTF_id": eval_id,
                             "train_start_id": train_start_id,
                             "train_end_id": train_end_id,
@@ -144,9 +144,11 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     if train_settings_dict["parametric_learning"]:
         train_set = train_set_pr
         test_set = test_set_pr
+        tests = range(test_start_id,test_end_id)
     else:
         train_set = train_set_otf   
         test_set = train_set
+        tests = [eval_id]
     #here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
     print(f"\ncheck...\tBCs for sample no. {eval_id}: {coeffs_matrix[eval_id,:]}")
     print(f"\ncheck...\tParametric learning: {train_settings_dict['parametric_learning']}")
@@ -164,20 +166,10 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
     # load teh best model
     ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
-
-    if train_settings_dict["parametric_learning"]:
-        FOL_UVW = np.array(ifol.Predict(test_set))
-        tests = range(test_start_id,test_start_id+20)
-    else:    
-        FOL_UVW = np.array(ifol.Predict(train_set)).reshape(-1)
-        fe_mesh['U_FOL'] = FOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
-        # fe_mesh["K"] = train_set.reshape((fe_mesh.GetNumberOfNodes(),1))
-        tests = [eval_id]
-
-        
+   
     for eval_id in tests:
-        FOL_UVW = np.array(ifol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
-        fe_mesh[f'U_FOL_{eval_id}'] = FOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+        iFOL_UVW = np.array(ifol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
+        fe_mesh[f'U_iFOL_{eval_id}'] = iFOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
         # solve FE here
         updated_bc = bc_dict.copy()
         updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix[eval_id,0]},
@@ -186,22 +178,31 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
         updated_loss_setting = loss_settings.copy()
         updated_loss_setting.update({"dirichlet_bc_dict":updated_bc})
-        mechanical_loss_3d_updated = SaintVenantMechanicalLossLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
+        mechanical_loss_3d_updated = SaintVenantMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
                                                                                     fe_mesh=fe_mesh)
         mechanical_loss_3d_updated.Initialize()
+
+        fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
+                    "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
+                                                    "maxiter":30,"load_incr":2}}
+        nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
+        nonlin_fe_solver.Initialize()
+        FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
+        fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+        abs_err = abs(FE_UVW.reshape(-1,1) - iFOL_UVW.reshape(-1,1))
+        fe_mesh[f"abs_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
         try:
-            hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
+            nin_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                     "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
                                                     "maxiter":30,"load_incr":1}}
-            nonlin_hfe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,hfe_setting)
-            nonlin_hfe_solver.Initialize()
-            HFE_UVW = np.array(nonlin_hfe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),FOL_UVW.reshape(3*fe_mesh.GetNumberOfNodes())))
-        except:
-            ValueError('res_norm contains nan values!')
-            HFE_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
-        fe_mesh[f'U_HFE_{eval_id}'] = HFE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
-        abs_err = abs(HFE_UVW.reshape(-1,1) - FOL_UVW.reshape(-1,1))
-        fe_mesh[f"abs_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            nonlin_nin_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,nin_setting)
+            nonlin_nin_solver.Initialize()
+            NIN_UVW = np.array(nonlin_nin_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),iFOL_UVW.reshape(3*fe_mesh.GetNumberOfNodes())))
+        except Exception as e:
+            print(f"Error occured as {e}")
+            NIN_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
+        fe_mesh[f'U_NIN_{eval_id}'] = NIN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+        
 
     fe_mesh.Finalize(export_dir=case_dir)
 
@@ -210,7 +211,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
 if __name__ == "__main__":
     # Initialize default values
-    ifol_num_epochs = 100
+    ifol_num_epochs = 5
     solve_FE = True
     clean_dir = False
 

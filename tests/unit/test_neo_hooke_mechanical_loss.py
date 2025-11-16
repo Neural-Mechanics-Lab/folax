@@ -1,10 +1,14 @@
 import pytest
 import unittest 
-import os
+import os,sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DHexa
+from fol.loss_functions.mechanical_neohooke_AD import NeoHookeMechanicalLoss2DQuad as NeoHookeMechanicalLossQuadAD
+from fol.loss_functions.mechanical_neohooke_AD import NeoHookeMechanicalLoss3DTetra as NeoHookeMechanicalLossTetraAD
+from fol.loss_functions.mechanical_neohooke_AD import NeoHookeMechanicalLoss3DHexa as NeoHookeMechanicalLossHexaAD
 from fol.tools.usefull_functions import *
 
 class TestMechanical3D(unittest.TestCase):
@@ -34,6 +38,46 @@ class TestMechanical3D(unittest.TestCase):
         en, residuals, stiffness = mechanical_loss_3d.ComputeElement(tet_points_coordinates,
                                                                         jnp.ones((4)),
                                                                         jnp.ones((12,1)))
+        print(f"res analytical: {residuals}")
+
+        # np.testing.assert_allclose(stiffness,jnp.array([[6.554754078e-02,1.783143356e-02,-5.668462366e-10,-7.916516811e-02,-1.261478197e-02,1.972369212e-10,3.425493091e-02,5.458430387e-03,6.941492110e-02,-2.063729800e-02,-1.067508198e-02,-6.941492110e-02],
+        #                                                 [1.783143356e-02,2.785472944e-02,-2.256608650e-10,-1.581991278e-02,-2.579435147e-02,7.851969075e-11,6.845304277e-03,1.116126217e-02,2.763399109e-02,-8.856823668e-03,-1.322164107e-02,-2.763399109e-02],
+        #                                                 [-5.668461811e-10,-2.256609760e-10,2.075605839e-02,7.066782159e-10,7.851982953e-11,-2.332433499e-02,4.627658427e-02,1.842265204e-02,1.009248663e-02,-4.627658427e-02,-1.842265204e-02,-7.524208631e-03],
+        #                                                 [-7.916516811e-02,-1.581991464e-02,7.066782159e-10,9.780602157e-02,7.735087071e-03,-2.458921400e-10,-4.232086614e-02,-3.346974263e-03,-8.653849363e-02,2.368000895e-02,1.143180020e-02,8.653849363e-02],
+        #                                                 [-1.261478197e-02,-2.579435147e-02,7.851971157e-11,7.735087071e-03,2.904958464e-02,-2.732140209e-11,-3.346981714e-03,-1.256981213e-02,-9.615371004e-03,8.226676844e-03,9.314578027e-03,9.615371004e-03],
+        #                                                 [1.972368657e-10,7.851982259e-11,-2.332433499e-02,-2.458921122e-10,-2.732135351e-11,2.819013409e-02,-5.769229308e-02,-6.410246249e-03,-1.219792664e-02,5.769229308e-02,6.410246249e-03,7.332130801e-03],
+        #                                                 [3.425493091e-02,6.845304277e-03,4.627658427e-02,-4.232086241e-02,-3.346981714e-03,-5.769228563e-02,1.378396899e-01,1.448239782e-03,6.240895018e-02,-1.297737509e-01,-4.946561996e-03,-5.099324137e-02],
+        #                                                 [5.458430387e-03,1.116126217e-02,1.842265204e-02,-3.346974030e-03,-1.256981213e-02,-6.410247181e-03,1.448239665e-03,1.249663532e-01,6.934275851e-03,-3.559696022e-03,-1.235577911e-01,-1.894668303e-02],
+        #                                                 [6.941492110e-02,2.763399109e-02,1.009248663e-02,-8.653849363e-02,-9.615371004e-03,-1.219792664e-02,6.240895018e-02,6.934275851e-03,4.236238897e-01,-4.528537765e-02,-2.495289594e-02,-4.215184748e-01],
+        #                                                 [-2.063729800e-02,-8.856822737e-03,-4.627658427e-02,2.368001081e-02,8.226675913e-03,5.769228563e-02,-1.297737509e-01,-3.559696022e-03,-4.528537765e-02,1.267310381e-01,4.189842846e-03,3.386967257e-02],
+        #                                                 [-1.067508105e-02,-1.322164014e-02,-1.842265204e-02,1.143180020e-02,9.314577095e-03,6.410246249e-03,-4.946561530e-03,-1.235577911e-01,-2.495289594e-02,4.189842846e-03,1.274648607e-01,3.696529940e-02],
+        #                                                 [-6.941492110e-02,-2.763399109e-02,-7.524208631e-03,8.653849363e-02,9.615371004e-03,7.332130801e-03,-5.099324882e-02,-1.894668303e-02,-4.215184748e-01,3.386967257e-02,3.696530312e-02,4.217105806e-01]])
+        #                             ,rtol=1e-6, atol=1e-8)
+
+        # np.testing.assert_allclose(residuals.flatten(),jnp.array([-7.769288e-04,
+        #                                                             -1.553857e-03,
+        #                                                             -2.330785e-03,
+        #                                                             -7.769275e-04,
+        #                                                             -1.553855e-03,
+        #                                                             -2.330784e-03,
+        #                                                             -7.769284e-04,
+        #                                                             -1.553858e-03,
+        #                                                             -2.330786e-03,
+        #                                                             -7.769278e-04,
+        #                                                             -1.553854e-03,
+        #                                                             -2.330783e-03])
+        #                            ,rtol=1e-6, atol=1e-10)
+        
+        mechanical_loss_3d_AD = NeoHookeMechanicalLossTetraAD("mechanical_loss_3d",loss_settings={"dirichlet_bc_dict":{"Ux":{},"Uy":{},"Uz":{}},
+                                                                                       "material_dict":{"young_modulus":1,"poisson_ratio":0.3},
+                                                                                       "body_foce":jnp.array([[1],[2],[3]])},
+                                                                                        fe_mesh=fe_mesh)
+        mechanical_loss_3d_AD.Initialize()
+        
+        en, residuals, stiffness = mechanical_loss_3d_AD.ComputeElement(tet_points_coordinates,
+                                                                        jnp.ones((4)),
+                                                                        jnp.ones((12,1)))
+        print(f"AD res: {residuals}")
 
         np.testing.assert_allclose(stiffness,jnp.array([[6.554754078e-02,1.783143356e-02,-5.668462366e-10,-7.916516811e-02,-1.261478197e-02,1.972369212e-10,3.425493091e-02,5.458430387e-03,6.941492110e-02,-2.063729800e-02,-1.067508198e-02,-6.941492110e-02],
                                                         [1.783143356e-02,2.785472944e-02,-2.256608650e-10,-1.581991278e-02,-2.579435147e-02,7.851969075e-11,6.845304277e-03,1.116126217e-02,2.763399109e-02,-8.856823668e-03,-1.322164107e-02,-2.763399109e-02],

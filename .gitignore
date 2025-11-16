@@ -17,3 +17,4 @@ py-env*
 .venv
 requirements.txt
 ifol_output*/
+ifol_output*

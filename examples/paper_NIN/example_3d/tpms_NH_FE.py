@@ -1,6 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
+import jax
+jax.config.update('jax_enable_x64',True)
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
@@ -18,87 +20,74 @@ from mechanical3d_utilities import *
 
 def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "ground_truth_sample"
+    working_directory_name = "ifol_output_tpms_NH_AD"
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
-    #call the function to create the mesh
+    # #call the function to create the mesh
+    # fe_mesh = create_3D_box_mesh(Nx=11,Ny=11,Nz=11,Lx=1.,Ly=1.,Lz=1.,case_dir=case_dir)
+    # fe_mesh.Initialize()
+
+    # tpms geometry from a mesh file
     fe_mesh = Mesh("fol_io","cylindrical_fine_all_sides.med",os.path.join(os.path.abspath(__file__),'../../../meshes'))
     fe_mesh.Initialize()
 
     # creation of fe model and loss function
-    bc_dict = {"Ux":{"left":0.0,"right":0.25},
-                "Uy":{"left":0.0,"right":0.25},
+    bc_dict = {"Ux":{"left":0.0,"right":0.2},
+                "Uy":{"left":0.0,"right":0.0},
                 "Uz":{"left":0.0,"right":0.0}}
     material_dict = {"young_modulus":1,"poisson_ratio":0.3}
-    loss_settings = {"dirichlet_bc_dict":bc_dict,"parametric_boundary_learning":True,"material_dict":material_dict,"num_gp":2}
+    loss_settings = {"dirichlet_bc_dict":bc_dict,"parametric_boundary_learning":True,"material_dict":material_dict}
     mechanical_loss_3d = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=loss_settings,
                                                                                    fe_mesh=fe_mesh)
     mechanical_loss_3d.Initialize()
 
 
     # dirichlet control
-    dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"},"Uz":{"right"}}}
+    dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}}}
     dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                          fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
     dirichlet_control.Initialize()
+    print(dirichlet_control.num_control_vars)
 
-    # create some random coefficients & K for training
-    n_samples = 200
-    np.random.seed(42)
-    ux_comp = np.random.uniform(low=-0.05, high=0.5, size=n_samples).reshape(-1,1)
-    uy_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-    uz_comp = np.random.uniform(low=-0.1, high=0.1, size=n_samples).reshape(-1,1)
-    coeffs_matrix = np.concatenate((np.concatenate((ux_comp,uy_comp),axis=1),uz_comp),axis=1)
+    # solve FE here
+    # shear BCs
+    updated_bc_shear = bc_dict.copy()
+    updated_bc_shear.update({"Ux":{"left":0.,"right":0.},
+                        "Uy":{"left":0.,"right":0.2},
+                        "Uz":{"left":0.,"right":0.}})
+    
+    # Compression BCs
+    updated_bc_compression = bc_dict.copy()
+    updated_bc_compression.update({"Ux":{"left":0.,"right":-0.2},
+                        "Uy":{"left":0.,"right":0.},
+                        "Uz":{"left":0.,"right":0.}})
+    
+    updated_bc_tension = bc_dict.copy()
+    updated_bc_tension.update({"Ux":{"left":0.,"right":0.2},
+                        "Uy":{"left":0.,"right":0.0},
+                        "Uz":{"left":0.,"right":0.0}})
 
 
-    gt_data_dict = {}
-    for eval_id in range(n_samples):
-        # update BCs
-        updated_bc = bc_dict.copy()
-        updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix[eval_id,0]},
-                            "Uy":{"left":0.,"right":coeffs_matrix[eval_id,1]},
-                            "Uz":{"left":0.,"right":coeffs_matrix[eval_id,2]}})
+    updated_loss_setting = loss_settings.copy()
+    updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_tension})
+    mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
+                                                                            fe_mesh=fe_mesh)
+    mechanical_loss_3d_updated.Initialize()
+    fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
+                "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                            "maxiter":8,"load_incr":21},
+                "output_directory":case_dir}
+    nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
+    nonlin_fe_solver.Initialize()
+    FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
+    plot_norm_iter(data=np.loadtxt(case_dir+"/res_norm_jax.txt"),plot_name=case_dir+'/res_norm_iter_FE_AD',type='1')
+    
+    fe_mesh[f'U_FE'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
-        updated_loss_setting = loss_settings.copy()
-        updated_loss_setting.update({"dirichlet_bc_dict":updated_bc})
-        mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
-                                                                                    fe_mesh=fe_mesh)
-        mechanical_loss_3d_updated.Initialize()
-
-        try:
-            fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                    "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
-                                                    "maxiter":8,"load_incr":30}}
-            nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
-            nonlin_fe_solver.Initialize()
-            FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
-        except:
-            ValueError('res_norm contains nan values!')
-            fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                    "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
-                                                    "maxiter":8,"load_incr":60}}
-            nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
-            nonlin_fe_solver.Initialize()
-            try:
-                FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
-            except:
-                ValueError('res_norm contains nan values!')
-                FE_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
-
-        # store in dictionary
-        gt_data_dict[f"FE_eval_{eval_id}"] = {}
-        gt_data_dict[f"FE_eval_{eval_id}"] = {
-            "bc_dict": updated_bc,
-            "FE_UVW": FE_UVW,
-            "coeffs_matrix":coeffs_matrix[eval_id,:]
-        }
-        
-        fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
-
-    with open(os.path.join(case_dir,'gt_values.pkl'), 'wb') as f:
-                pickle.dump(gt_data_dict,f)
+    FE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+    fe_mesh[f'P_FE'] = FE_stress.reshape((fe_mesh.GetNumberOfNodes(), 6))
 
     fe_mesh.Finalize(export_dir=case_dir,export_format='vtu')
 

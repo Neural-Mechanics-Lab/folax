@@ -3,6 +3,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
 import optax
 import numpy as np
+import jax
+jax.config.update('jax_enable_x64',True)
 from fol.loss_functions.regression_loss import RegressionLoss
 from fol.controls.identity_control import IdentityControl
 from data_driven_meta_alpha_meta_implicit_parametric_operator_learning import DataDrivenMetaAlphaMetaImplicitParametricOperatorLearning
@@ -11,10 +13,11 @@ from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import Logger
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
 # from fol.data_input_output.zarr_io import ZarrIO
-from dirichlet_control import DirichletControl3D
+from fol.controls.dirichlet_control import DirichletControl
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 import pickle
+from mechanical3d_utilities import *
 
 # directory & save handling
 working_directory_name = 'ifol_output_implicit_data_driven'
@@ -38,7 +41,7 @@ mechanical_loss_3d.Initialize()
 
 # dirichlet control
 dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}, "Uz":{"right"}}}
-dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings,
+dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings,
                                         fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
 dirichlet_control.Initialize()
 
@@ -52,6 +55,8 @@ for i in range(len(gt_dict.keys())):
     coeffs_mat.append(gt_dict[f'FE_eval_{i}']['coeffs_matrix'])
 gt_fe_array = np.array(gt_fe)
 coeffs_matrix = np.array(coeffs_mat)
+np.savetxt(case_dir+'/coeffs_matrix_dd.txt',coeffs_matrix)
+exit()
 
 ### extend K_matrix to incorporate all dofs
 K_mat = []
@@ -123,8 +128,8 @@ fol.Initialize()
 
 train_start_id = 0
 train_end_id = 160
-test_start_id = 150
-test_end_id = 160
+test_start_id = 160
+test_end_id = 200
 
 # fol.Train(train_set=(K_matrix[train_start_id:train_end_id,:],gt_fe_array[train_start_id:train_end_id,:]),
 #           test_set=(K_matrix[test_start_id:test_end_id,:],gt_fe_array[test_start_id:test_end_id,:]),
@@ -134,19 +139,38 @@ test_end_id = 160
 #           working_directory=case_dir)
 # load the best model
 fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
+coeffs_matrix_test = np.array([
+    [-0.08,-0.08,0.08],
+    [-0.09,-0.09,0.09],
+    [-0.095,-0.095,0.095],
+    [0.25,0.2,0.2],
+    [0.25,0.25,0.25],
+    [0.25,-0.08,0.2],
+    [0.25,-0.09,0.2],
+    [0.25,-0.095,0.2],
+])
+K_matrix_dirichlet_test = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix_test)
+K_mat_test = []
+for i in range(coeffs_matrix_test.shape[0]):
+    K_matrix_test_total = np.zeros(3*fe_mesh.GetNumberOfNodes())
+    K_matrix_test_total[mechanical_loss_3d.dirichlet_indices]= K_matrix_dirichlet_test[i,:]
+    K_mat_test.append(K_matrix_test_total)
+K_matrix_test = np.array(K_mat_test)
+print(K_matrix_test.shape)
 
-for eval_id in list(np.arange(test_start_id,test_end_id)):
-    U_iFOL = np.array(fol.Predict(K_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
-    U_FEM = gt_fe_array[eval_id]
-    abs_err = abs(U_iFOL.reshape(-1)-U_FEM.reshape(-1))
-    fe_mesh[f'U_FEM_{eval_id}'] = U_FEM.reshape((fe_mesh.GetNumberOfNodes(), 3))
-    fe_mesh[f'U_iFOL_{eval_id}'] = U_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 3))
-    fe_mesh[f'abs_err_{eval_id}'] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
+# for eval_id in list(np.arange(test_start_id,test_end_id)):
+for eval_id in range(coeffs_matrix_test.shape[0]):
+    U_iFOL = np.array(fol.Predict(K_matrix_test[eval_id,:].reshape(-1,1).T)).reshape(-1)
+    # U_FEM = gt_fe_array[eval_id]
+    # abs_err = abs(U_iFOL.reshape(-1)-U_FEM.reshape(-1))
+    # fe_mesh[f'U_FEM_{eval_id}'] = U_FEM.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    # fe_mesh[f'U_iFOL_{eval_id}'] = U_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    # fe_mesh[f'abs_err_{eval_id}'] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
     # Compression BCs
     updated_bc = bc_dict.copy()
-    updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix[eval_id,0]},
-                        "Uy":{"left":0.,"right":coeffs_matrix[eval_id,1]},
-                        "Uz":{"left":0.,"right":coeffs_matrix[eval_id,2]}})
+    updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix_test[eval_id,0]},
+                        "Uy":{"left":0.,"right":coeffs_matrix_test[eval_id,1]},
+                        "Uz":{"left":0.,"right":coeffs_matrix_test[eval_id,2]}})
 
     updated_loss_setting = loss_settings.copy()
     updated_loss_setting.update({"dirichlet_bc_dict":updated_bc})
@@ -155,15 +179,54 @@ for eval_id in list(np.arange(test_start_id,test_end_id)):
     mechanical_loss_3d_updated.Initialize()
     try:
         hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
-                                                "maxiter":20,"load_incr":1}}
+                        "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                                "maxiter":8,"load_incr":1},
+                        "output_directory":case_dir}
         nonlin_hfe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,hfe_setting)
         nonlin_hfe_solver.Initialize()
         HFE_UVW = np.array(nonlin_hfe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),U_iFOL.reshape(3*fe_mesh.GetNumberOfNodes())))
-    except:
-        ValueError('res_norm contains nan values!')
+        plot_norm_iter(data=np.loadtxt(case_dir+"/res_norm_jax.txt"),plot_name=case_dir+f'/res_norm_iter_NIN_BC_test_{coeffs_matrix_test[eval_id,:]}',type=None)
+    except Exception as e:
+        print(f"Error occurred: {e}")
         HFE_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
     fe_mesh[f'U_HFE_{eval_id}'] = HFE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    
+    load_incr_values = [2, 4, 8, 12, 15, 20]
+    FE_UVW = None
+
+    for load_incr in load_incr_values:
+        try:
+            fe_setting = {"linear_solver_settings": {"solver": "JAX-direct"},
+                        "nonlinear_solver_settings": {"rel_tol": 1e-6,"abs_tol": 1e-6,"maxiter": 12,"load_incr": load_incr},
+                        "output_directory": case_dir}
+
+            nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver", mechanical_loss_3d_updated, fe_setting)
+            nonlin_fe_solver.Initialize()
+
+            FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3 * fe_mesh.GetNumberOfNodes())))
+
+            plot_norm_iter(data=np.loadtxt(case_dir + "/res_norm_jax.txt"),plot_name=case_dir + f'/res_norm_iter_FE_BC_test_{coeffs_matrix_test[eval_id, :]}',type='1')
+
+            print(f"FE solution succeeded with load_incr = {load_incr}")
+            break  # Exit loop if successful
+
+        except Exception as e:
+            print(f"Error occurred with load_incr = {load_incr}: {e}")
+            FE_UVW = None  # optional, just to make it explicit
+
+    if FE_UVW is None:
+        print("All FE attempts failed. Assigning zero displacement.")
+        FE_UVW = np.zeros(3 * fe_mesh.GetNumberOfNodes())
+
+    Piola_iFOL = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=U_iFOL, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+    fe_mesh[f'First_Piola_iFOL_{eval_id}'] = Piola_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 6))
+    Piola_FE = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))
+    fe_mesh[f'First_Piola_FE_{eval_id}'] = Piola_FE.reshape((fe_mesh.GetNumberOfNodes(), 6))
+
+    abs_err = abs(U_iFOL.reshape(-1)-FE_UVW.reshape(-1))
+    fe_mesh[f'U_FEM_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    fe_mesh[f'U_iFOL_{eval_id}'] = U_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 3))
+    fe_mesh[f'abs_err_{eval_id}'] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
 
 fe_mesh.Finalize(export_dir=case_dir,export_format='vtu')

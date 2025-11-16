@@ -1,13 +1,14 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
-#import jax
-#jax.config.update("jax_platform_name","cpu")
+import jax
+jax.config.update("jax_platform_name","cpu")
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.mesh_input_output.mesh import Mesh
 from fol.controls.identity_control import IdentityControl
+from fol.controls.fourier_control import FourierControl
 from fol.deep_neural_networks.meta_alpha_meta_implicit_parametric_operator_learning import MetaAlphaMetaImplicitParametricOperatorLearning
 from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import *
@@ -18,25 +19,16 @@ from flax import nnx
 from mechanical2d_utilities import *
 from fol.tools.decoration_functions import *
 
-### Script's goal:
-####### the following script is to 
-####### first load K_matrix from either a pkl file or txt file in base 
-####### resolution, then train or load a pre-trained network to
-####### save the output of FE and iFOL solver for Displacement/Stresses 
-####### in a dictionary to be used in hybrid solver to solve for corresponding ZSSR 
-####### resolution. It uses function dump_output to create plots and .json file storing
-####### all network hyper-parameters.
 
-
-def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False):
+def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "ifol_output_mechanical_2d"
+    working_directory_name = "ifol_output_NiN"
     case_dir = os.path.join('.', working_directory_name)
-    # create_clean_directory(working_directory_name)
+    create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     # problem setup
-    model_settings = {"L":1,"N":81,
+    model_settings = {"L":1,"N":41,
                     "Ux_left":0.0,"Ux_right":0.5,
                     "Uy_left":0.0,"Uy_right":0.5}
 
@@ -57,40 +49,35 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
 
     mechanical_loss_2d.Initialize()
 
-    identity_control = IdentityControl('identity_control', control_settings={}, fe_mesh=fe_mesh)
+    identity_control = IdentityControl('identity_control', control_settings={},num_vars=fe_mesh.GetNumberOfNodes())
     identity_control.Initialize()
     
     
-    #### load a binary file:
+    # fourier control
+    fourier_control_settings = {"x_freqs":np.array([2,4,6]),"y_freqs":np.array([2,4,6]),"z_freqs":np.array([0]),
+                                "beta":20,"min":1e-1,"max":1}
+    fourier_control = FourierControl("fourier_control",fourier_control_settings,fe_mesh)
+    fourier_control.Initialize()
 
-    # file_path = "sample_info_dict.pkl"
-    # sample_info_dict = {}
-    # with open(file_path, 'rb') as f:
-    #     sample_info_dict = pickle.load(f)
-    # fol_info(f"The file {file_path} loaded and stored in the variable sample_info_dict!")
-    
-    # # create K_matrix from saved topologies dictionary
-    # K_matrix_all = []
-    # for sample_type, sample_data in sample_info_dict.items():
-    #     K_matrix_dict = sample_data.get("K_matrix",{})
-    #     for axis_value , K_matrix_at_axis in K_matrix_dict.items():
-    #         K_matrix_all.append(K_matrix_at_axis)
+    # create some random coefficients & K for training
+    create_random_coefficients = True
+    if create_random_coefficients:
+        number_of_random_samples = 200
+        coeffs_matrix,K_matrix = create_random_fourier_samples(fourier_control,number_of_random_samples)
+        export_dict = model_settings.copy()
+        export_dict["coeffs_matrix"] = coeffs_matrix
+        export_dict["x_freqs"] = fourier_control.x_freqs
+        export_dict["y_freqs"] = fourier_control.y_freqs
+        export_dict["z_freqs"] = fourier_control.z_freqs
+        with open(f'fourier_control_dict_N_{model_settings["N"]}.pkl', 'wb') as f:
+            pickle.dump(export_dict,f)
+    else:
+        with open(f'fourier_control_dict_N_{model_settings["N"]}.pkl', 'rb') as f:
+            loaded_dict = pickle.load(f)
+        
+        coeffs_matrix = loaded_dict["coeffs_matrix"]
 
-    # K_matrix = np.array(K_matrix_all)
-    # fol_info(f"K_matrix shape loaded from {file_path}: {K_matrix.shape}")
-
-    #### load a txt file:
-    fourier_file = os.path.join(case_dir,f"ifol_fourier_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    voronoi_file = os.path.join(case_dir,f"ifol_voronoi_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    tpms_file = os.path.join(case_dir,f"ifol_tpms_test_samples_K_matrix_res_{model_settings['N']}.txt")
-    
-
-    K_matrix_fourier = np.loadtxt(fourier_file)
-    K_matrix_voronoi = np.loadtxt(voronoi_file)
-    K_matrix_tpms = np.loadtxt(tpms_file)
-
-    K_matrix_1 = np.vstack((K_matrix_fourier,K_matrix_voronoi))
-    K_matrix = np.vstack((K_matrix_1, K_matrix_tpms))
+    K_matrix = fourier_control.ComputeBatchControlledVariables(coeffs_matrix)
 
 
     # now we need to create, initialize and train fol
@@ -101,14 +88,14 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
                                 "prediction_gain":30,
                                 "initialization_gain":1.0},
         "skip_connections_settings": {"active":False,"frequency":1},
-        "latent_size":  8*64,
+        "latent_size":  64,
         "modulator_bias": False,
         "main_loop_transform": 1e-5,
         "latent_step_optimizer": 1e-4,
         "ifol_nn_latent_step_size": 1e-2
     }
+
     # design synthesizer & modulator NN for hypernetwork
-    # characteristic_length = model_settings["N"]
     characteristic_length = ifol_settings_dict["characteristic_length"]
     synthesizer_nn = MLP(name="synthesizer_nn",
                         input_size=3,
@@ -132,7 +119,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     latent_step_optimizer = optax.chain(optax.adam(ifol_settings_dict["latent_step_optimizer"]))
 
     # create fol
-    ifol = MetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_fol",control=identity_control,
+    ifol = MetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_fol",control=fourier_control,
                                                             loss_function=mechanical_loss_2d,
                                                             flax_neural_network=hyper_network,
                                                             main_loop_optax_optimizer=main_loop_transform,
@@ -142,22 +129,22 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
     ifol.Initialize()
 
     otf_id = 0
-    train_set_otf = K_matrix[otf_id,:].reshape(-1,1).T     # for On The Fly training
+    train_set_otf = coeffs_matrix[otf_id,:].reshape(-1,1).T     # for On The Fly training
 
     train_start_id = 0
     train_end_id = 8
-    train_set_pr = K_matrix[train_start_id,train_end_id]     # for parametric training
+    train_set_pr = coeffs_matrix[train_start_id:train_end_id,:]     # for parametric training
 
     test_start_id = 8
     test_end_id = 10
-    test_set_pr = K_matrix[test_start_id,test_end_id]
+    test_set_pr = coeffs_matrix[test_start_id:test_end_id,:]
 
     # OTF or Parametric 
     parametric_learning = False
     if parametric_learning:
         train_set = train_set_pr
         test_set = test_set_pr
-        tests = range(test_start_id,test_start_id+5)
+        tests = range(test_start_id,test_end_id)
     else:
         train_set = train_set_otf   
         test_set = train_set
@@ -172,31 +159,23 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
                             "test_start_id": test_start_id,
                             "test_end_id": test_end_id}
     
-    solve_ifol = True
-    if solve_ifol:
-        ifol.Train(train_set=(train_set,),
-                    test_set=(test_set,),
-                    test_frequency=100,
-                    batch_size=train_settings_dict["batch_size"],
-                    convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
-                    plot_settings={"plot_save_rate":100},
-                    train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-                    working_directory=case_dir)
-
-        if parametric_learning:
-            iFOL_UVW = np.array(ifol.Predict(K_matrix))
-        else:
-            iFOL_UVW = np.array(ifol.Predict(K_matrix[otf_id].reshape(-1,1).T))
+    ifol.Train(train_set=(train_set,),
+                test_set=(test_set,),
+                test_frequency=100,
+                batch_size=train_settings_dict["batch_size"],
+                convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
+                plot_settings={"plot_save_rate":100},
+                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+                working_directory=case_dir)
 
     # load teh best model
     ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
     U_dict = {}
     for eval_id in tests:
-        if solve_ifol:
-            ifol_uvw = np.array(iFOL_UVW[eval_id,:].reshape(-1,1).T)
-            fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
-            fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
+        ifol_uvw = np.array(ifol.Predict(K_matrix[otf_id].reshape(-1,1).T))
+        fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
+        fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
 
         # solve FE here
         if solve_FE:
@@ -208,15 +187,12 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
             FE_UVW = np.array(nonlin_fe_solver.Solve(K_matrix[eval_id,:],np.zeros(2*fe_mesh.GetNumberOfNodes())))  
 
             fe_mesh[f'FE_U_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
-            fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
 
-            if solve_ifol:
-                abs_err = abs(FE_UVW.reshape(-1,1) - ifol_uvw.reshape(-1,1))
-                fe_mesh[f"abs_U_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 2))
+            abs_err = abs(FE_UVW.reshape(-1,1) - ifol_uvw.reshape(-1,1))
+            fe_mesh[f"abs_U_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 2))
 
-                U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
-                U_dict[f"abs_error_{eval_id}"] = abs_err
-
+            U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
+            U_dict[f"abs_error_{eval_id}"] = abs_err
             U_dict[f'K_matrix_{eval_id}'] = K_matrix[eval_id,:]
             U_dict[f'U_FE_{eval_id}'] = FE_UVW
 
@@ -224,35 +200,22 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_FE_hybrid=False,clean_dir=False
             # with open(f"U_base_res_{model_settings['N']}_bc_{model_settings['Ux_right']}.pkl" , 'wb') as f:
             #     pickle.dump(U_dict,f)
 
-        if solve_FE_hybrid:
+        if solve_NiN:
             # hybrid solver
             fol_info("solve fe hybrid in one load step")
-            hfe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
+            nin_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                         "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
                                                         "maxiter":10,"load_incr":1}}
-            hybrid_nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("hybrid_nonlin_fe_solver",mechanical_loss_2d,hfe_setting)
-            hybrid_nonlin_fe_solver.Initialize()
+            nin_nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nin_nonlin_fe_solver",mechanical_loss_2d,nin_setting)
+            nin_nonlin_fe_solver.Initialize()
             try:    
-                FE_H_UVW = np.array(hybrid_nonlin_fe_solver.Solve(K_matrix[eval_id,:],ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes())))  
-            except:
-                ValueError("res_norm contains nan values!")
-                FE_H_UVW = np.zeros(2*fe_mesh.GetNumberOfNodes())
+                NiN_UVW = np.array(nin_nonlin_fe_solver.Solve(K_matrix[eval_id,:],ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes())))  
+            except Exception as e:
+                print(f"Error occured {type(e).__name__}")
+                NiN_UVW = np.zeros(2*fe_mesh.GetNumberOfNodes())
 
-            fe_mesh[f'HFE_U_{eval_id}'] = FE_H_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
+            fe_mesh[f'NiN_U_{eval_id}'] = NiN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
-
-
-            # plot_settings = {"topology_field":K_matrix[eval_id,:], "ifol_sol_field":ifol_uvw, "fe_sol_field":FE_UVW, 
-            #                     "hfe_sol_field":FE_H_UVW, "err_sol_field":abs_err, 
-            #                     "file_name":f"plot_ifol_fe_{eval_id}_res_{model_settings['N']}"}
-            
-            # dump_output(ifol_model_settings=ifol_settings_dict,
-            #     train_settings_dict=train_settings_dict,
-            #     model_settings=model_settings,
-            #     material_dict=material_dict,
-            #     plotter= plot_iFOL_FE_HFE,
-            #     plot_settings=plot_settings,
-            #     file_name=f"output_{eval_id}_res_{model_settings['N']}",case_dir=case_dir,file_format='json')
 
 
     fe_mesh.Finalize(export_dir=case_dir)
@@ -266,7 +229,7 @@ if __name__ == "__main__":
     # Initialize default values
     ifol_num_epochs = 3000
     solve_FE = True
-    solve_FE_hybrid = False
+    solve_NiN = False
     clean_dir = False
 
     # Parse the command-line arguments
@@ -287,12 +250,12 @@ if __name__ == "__main__":
             else:
                 print("solve_FE should be True or False.")
                 sys.exit(1)
-        elif arg.startswith("solve_FE_hybrid="):
+        elif arg.startswith("solve_NiN="):
             value = arg.split("=")[1]
             if value.lower() in ['true', 'false']:
-                solve_FE_hybrid = value.lower() == 'true'
+                solve_NiN = value.lower() == 'true'
             else:
-                print("solve_FE_hybrid should be True or False.")
+                print("solve_NiN should be True or False.")
                 sys.exit(1)
         elif arg.startswith("clean_dir="):
             value = arg.split("=")[1]
@@ -306,4 +269,4 @@ if __name__ == "__main__":
             sys.exit(1)
 
     # Call the main function with the parsed values
-    main(ifol_num_epochs,solve_FE,solve_FE_hybrid,clean_dir)
+    main(ifol_num_epochs,solve_FE,solve_NiN,clean_dir)

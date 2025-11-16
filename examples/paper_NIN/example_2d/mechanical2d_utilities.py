@@ -532,50 +532,6 @@ def plot_tpms_2d(tpms_settings: dict, model_settings: dict, tpms_fn: Callable, f
     else:
         plt.show()
 
-import numpy as np
-import jax.numpy as jnp
-
-# def compute_nodal_stress_from_gauss(total_stress: jnp.ndarray, element_nodes: np.ndarray, num_nodes: int) -> jnp.ndarray:
-#     """
-#     Args:
-#         total_stress: jnp.ndarray of shape (num_elements, 4, 3) - stress at Gauss points
-#         element_nodes: np.ndarray of shape (num_elements, 4) - node indices per element
-#         num_nodes: total number of nodes in the mesh
-
-#     Returns:
-#         nodal_stress: jnp.ndarray of shape (num_nodes, 3) - averaged stress per node
-#     """
-#     # Accumulators
-#     stress_accumulator = np.zeros((num_nodes, 3), dtype=np.float32)
-#     count_accumulator = np.zeros((num_nodes,), dtype=np.int32)
-
-#     num_elements, num_gauss, _ = total_stress.shape
-
-#     # For each element
-#     for e in range(num_elements):
-#         nodes = element_nodes[e]  # (4,) node indices
-#         gauss_stresses = total_stress[e]  # (4, 3)
-
-#         # Assuming Gauss point i corresponds to node i (common in reduced integration)
-#         for i in range(4):
-#             node_id = nodes[i]
-#             stress_accumulator[node_id] += np.array(gauss_stresses[i])
-#             count_accumulator[node_id] += 1
-
-#     # Avoid divide-by-zero
-#     count_accumulator[count_accumulator == 0] = 1
-#     nodal_stress = stress_accumulator / count_accumulator[:, None]  # shape: (num_nodes, 3)
-#     return jnp.array(nodal_stress)
-
-
-# def get_stress(loss_function:Loss, fe_mesh:Mesh, disp_field_vec:jnp.array, K_matrix:jnp.array):
-#     element_nodes = fe_mesh.GetElementsNodes(loss_function.element_type)
-#     total_control_vars = K_matrix.reshape(-1,1)
-#     total_stress = loss_function.ComputeTotalStress(total_control_vars,disp_field_vec)
-#     num_nodes = fe_mesh.GetNumberOfNodes()
-#     nodal_stress = compute_nodal_stress_from_gauss(total_stress, element_nodes, num_nodes)
-
-#     return nodal_stress.flatten()
 
 def plot_iFOL_HFE(topology_field:np.ndarray, ifol_sol_field:np.ndarray, hfe_sol_field:np.ndarray,
                  err_sol_field:np.ndarray, file_name:str, fig_titles:list[str]=[None,None,None,None]):
@@ -824,7 +780,7 @@ def voronoi_to_K_matrix(voronoi_sample_dict:dict):
 
 
 
-def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape_tuple:tuple[int,int,int], 
+def plot_paper_triple(topology_field:tuple[np.array, np.array, np.array], shape_tuple:tuple[int,int,int], 
                fe_sol_field:tuple[np.array, np.array, np.array],ifol_sol_field:tuple[np.array, np.array, np.array], 
                sol_field_err:tuple[np.array, np.array, np.array], file_name:str,
                fe_stress_field:np.array, ifol_stress_field:np.array, stress_field_err:np.array):
@@ -839,6 +795,8 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
     ifol_stress_field_zssr = ifol_stress_field
 
     fontsize = 16
+    font_axes = 16
+    font_titles = 20
     fig = plt.figure(figsize=(18, 26))
     gs = gridspec.GridSpec(6, 4, figure=fig, wspace=0.2, hspace=0.2)
     
@@ -863,7 +821,7 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
         [K_matrix_zssr2, ifol_sol_field_zssr2, sol_field_err_zssr2, fe_sol_field_zssr2]
     ]
     cmap_list = ['viridis', 'coolwarm', 'coolwarm', 'coolwarm']
-    title_list = ['Elasticity Morph.', 'iFOL', 'Abs. Difference', 'HFEM']
+    title_list = ['Elasticity Morph.', 'iFOL', 'Abs. Difference', 'NiN']
 
     # First 3 rows
     for row_index in range(3):
@@ -874,11 +832,12 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
             )
             axs[row_index, col_index].set_xticks([])
             axs[row_index, col_index].set_yticks([])
+            axs[row_index, col_index].tick_params(axis='both', labelsize=font_axes)
             axs[row_index, col_index].set_title(
-                f'{str(title_list[col_index])} {N[row_index]}x{N[row_index]}', fontsize=fontsize
-            )
+                f'{str(title_list[col_index])} {N[row_index]}x{N[row_index]}',fontsize=font_titles
+                )
             cbar = fig.colorbar(im, ax=axs[row_index, col_index], pad=0.02, shrink=0.7)
-            cbar.ax.tick_params(labelsize=fontsize)
+            cbar.ax.tick_params(labelsize=font_axes)
             cbar.ax.yaxis.labelpad = 5
             cbar.ax.tick_params(length=5, width=1)
 
@@ -905,17 +864,20 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
     im = axs[3, 0].imshow(ifol_sxx_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma',
                           vmin=fe_sxx_zssr.min(), vmax=fe_sxx_zssr.max())
     axs[3, 0].set_xticks([]); axs[3, 0].set_yticks([])
-    axs[3, 0].set_title(f'$P_{{11}}$, iFOL {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[3, 0], pad=0.02, shrink=0.7)
+    axs[3, 0].set_title(f'$P_{{11}}$, iFOL {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[3, 0], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
     im = axs[3, 1].imshow(fe_sxx_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma')
     axs[3, 1].set_xticks([]); axs[3, 1].set_yticks([])
-    axs[3, 1].set_title(f'$P_{{11}}$, HFEM {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[3, 1], pad=0.02, shrink=0.7)
+    axs[3, 1].set_title(f'$P_{{11}}$, NiN {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[3, 1], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
     axs[3, 2].plot(np.linspace(0, L, N_zssr2), stress_x_cross_ifol, label='iFOL', color='b')
-    axs[3, 2].plot(np.linspace(0, L, N_zssr2), stress_x_cross_fem, label='HFEM', color='r')
-    axs[3, 2].set_title('Cross-section $P_{11}$', fontsize=fontsize)
+    axs[3, 2].plot(np.linspace(0, L, N_zssr2), stress_x_cross_fem, label='NiN', color='r')
+    axs[3, 2].tick_params(axis='both', labelsize=font_axes)
+    axs[3, 2].set_title('Cross-section $P_{11}$', fontsize=font_titles)
     axs[3, 2].legend()
     # pos = axs[3, 2].get_position()
     # axs[3, 2].set_position([pos.x0, pos.y0, pos.width * 0.8, pos.height * 0.8])
@@ -924,17 +886,20 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
     im = axs[4, 0].imshow(ifol_syy_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma',
                           vmin=fe_syy_zssr.min(), vmax=fe_syy_zssr.max())
     axs[4, 0].set_xticks([]); axs[4, 0].set_yticks([])
-    axs[4, 0].set_title(f'$P_{{22}}$, iFOL {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[4, 0], pad=0.02, shrink=0.7)
+    axs[4, 0].set_title(f'$P_{{22}}$, iFOL {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[4, 0], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
     im = axs[4, 1].imshow(fe_syy_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma')
     axs[4, 1].set_xticks([]); axs[4, 1].set_yticks([])
-    axs[4, 1].set_title(f'$P_{{22}}$, HFEM {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[4, 1], pad=0.02, shrink=0.7)
+    axs[4, 1].set_title(f'$P_{{22}}$, NiN {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[4, 1], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
-    axs[4, 2].plot(np.linspace(0, L, N_zssr2), stress_y_cross_fem, label='HFEM', color='r')
+    axs[4, 2].plot(np.linspace(0, L, N_zssr2), stress_y_cross_fem, label='NiN', color='r')
     axs[4, 2].plot(np.linspace(0, L, N_zssr2), stress_y_cross_ifol, label='iFOL', color='b')
-    axs[4, 2].set_title('Cross-section $P_{22}$', fontsize=fontsize)
+    axs[4, 2].tick_params(axis='both', labelsize=font_axes)
+    axs[4, 2].set_title('Cross-section $P_{22}$', fontsize=font_titles)
     axs[4, 2].legend()
     # pos = axs[4, 2].get_position()
     # axs[4, 2].set_position([pos.x0, pos.y0, pos.width * 0.8, pos.height * 0.8])
@@ -943,17 +908,20 @@ def plot_paper_triple2(topology_field:tuple[np.array, np.array, np.array], shape
     im = axs[5, 0].imshow(ifol_sxy_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma',
                           vmin=fe_sxy_zssr.min(), vmax=fe_sxy_zssr.max())
     axs[5, 0].set_xticks([]); axs[5, 0].set_yticks([])
-    axs[5, 0].set_title(f'$P_{{12}}$, iFOL {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[5, 0], pad=0.02, shrink=0.7)
+    axs[5, 0].set_title(f'$P_{{12}}$, iFOL {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[5, 0], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
     im = axs[5, 1].imshow(fe_sxy_zssr.reshape(N_zssr2, N_zssr2), cmap='plasma')
     axs[5, 1].set_xticks([]); axs[5, 1].set_yticks([])
-    axs[5, 1].set_title(f'$P_{{12}}$, HFEM {N[2]}x{N[2]}', fontsize=fontsize)
-    fig.colorbar(im, ax=axs[5, 1], pad=0.02, shrink=0.7)
+    axs[5, 1].set_title(f'$P_{{12}}$, NiN {N[2]}x{N[2]}', fontsize=font_titles)
+    cb=fig.colorbar(im, ax=axs[5, 1], pad=0.02, shrink=0.7)
+    cb.ax.tick_params(labelsize=font_axes)
 
-    axs[5, 2].plot(np.linspace(0, L, N_zssr2), stress_xy_cross_fem, label='HFEM', color='r')
+    axs[5, 2].plot(np.linspace(0, L, N_zssr2), stress_xy_cross_fem, label='NiN', color='r')
     axs[5, 2].plot(np.linspace(0, L, N_zssr2), stress_xy_cross_ifol, label='iFOL', color='b')
-    axs[5, 2].set_title('Cross-section $P_{12}$', fontsize=fontsize)
+    axs[5, 2].tick_params(axis='both', labelsize=font_axes)
+    axs[5, 2].set_title('Cross-section $P_{12}$', fontsize=font_titles)
     axs[5, 2].legend()
     # pos = axs[5, 2].get_position()
     # axs[5, 2].set_position([pos.x0, pos.y0, pos.width * 0.8, pos.height * 0.8])
@@ -1057,7 +1025,6 @@ def plot_norm_iter(data,plot_name='res_norm_iter',type=None):
     plt.xlim()
     if type=='1':    
         plt.ylabel("Residual norm",fontdict={"size": 16})
-    plt.ylim((1e-9,3e-1))
     
     # set x-axis ticks every 5
     # plt.xticks(np.arange(0, len(data) + 1, 5))

@@ -2,10 +2,10 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
 import numpy as np
-from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
+from fol.loss_functions.mechanical_neohooke_AD import NeoHookeMechanicalLoss3DTetra
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.mesh_input_output.mesh import Mesh
-from dirichlet_control import DirichletControl3D
+from fol.controls.dirichlet_control import DirichletControl
 from fol.deep_neural_networks.meta_alpha_meta_implicit_parametric_operator_learning import MetaAlphaMetaImplicitParametricOperatorLearning
 from fol.deep_neural_networks.meta_implicit_parametric_operator_learning import MetaImplicitParametricOperatorLearning
 from fol.tools.usefull_functions import *
@@ -40,11 +40,11 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
     # dirichlet control
     dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}}}
-    dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
+    dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                          fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
     dirichlet_control.Initialize()
     print(dirichlet_control.num_control_vars)
-    exit()
+
 
     # create some random coefficients & K for training
     mean, std, n_samples = 0.2, 0.05, 200
@@ -154,7 +154,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     print(f"\ncheck...\tParametric learning: {train_settings_dict['parametric_learning']}")
     print(f"\ncheck...\ttraining sample ids: {train_start_id} -> {train_end_id}\n")
 
-    ifol_solve = True
+    ifol_solve = False
     if ifol_solve:
         ifol.Train(train_set=(train_set,),
                     test_set=(test_set,),
@@ -198,9 +198,14 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         updated_bc_compression.update({"Ux":{"left":0.,"right":-0.2},
                             "Uy":{"left":0.,"right":0.},
                             "Uz":{"left":0.,"right":0.}})
+        
+        updated_bc_tension = bc_dict.copy()
+        updated_bc_tension.update({"Ux":{"left":0.,"right":0.2},
+                            "Uy":{"left":0.,"right":0.},
+                            "Uz":{"left":0.,"right":0.}})
 
         updated_loss_setting = loss_settings.copy()
-        updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_compression})
+        updated_loss_setting.update({"dirichlet_bc_dict":updated_bc_tension})
         mechanical_loss_3d_updated = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_settings=updated_loss_setting,
                                                                                     fe_mesh=fe_mesh)
         mechanical_loss_3d_updated.Initialize()
@@ -226,12 +231,13 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                                                                                     fe_mesh=fe_mesh)
             mechanical_loss_3d_updated.Initialize()
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
-                    "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
-                                                    "maxiter":8,"load_incr":30}}
+                        "nonlinear_solver_settings":{"rel_tol":1e-6,"abs_tol":1e-6,
+                                                    "maxiter":8,"load_incr":40},
+                        "output_directory":case_dir}
             nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),np.zeros(3*fe_mesh.GetNumberOfNodes())))
-            plot_norm_iter(data=np.loadtxt("res_norm_jax.txt"),plot_name='res_norm_iter_FE',type='1')
+            plot_norm_iter(data=np.loadtxt(case_dir+"/res_norm_jax.txt"),plot_name=case_dir+'/res_norm_iter_FE',type='1')
 
             fe_mesh[f'U_FE_{eval_id}'] = FE_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
             FE_stress = get_stress(loss_function=mechanical_loss_3d_updated, disp_field_vec=FE_UVW, K_matrix=np.ones(fe_mesh.GetNumberOfNodes()))

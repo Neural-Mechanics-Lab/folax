@@ -39,7 +39,7 @@ class CategoricalDeepLearning(DeepNetwork):
         self.checkpointer = ocp.StandardCheckpointer()
 
         # initialize the nnx optimizer
-        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer)
+        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer, wrt=nnx.Param)
 
         self.initialized = True
     

@@ -20,7 +20,7 @@ def main(ifol_num_epochs=10,clean_dir=False):
         fol_warning(f"ifol_num_epochs is set to {ifol_num_epochs}, recommended value for good results is 5000 !")
 
     # directory & save handling
-    working_directory_name = 'meta_implicit_mechanical_2D'
+    working_directory_name = 'meta_alpha_meta_implicit_mechanical_2D'
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
@@ -102,8 +102,6 @@ def main(ifol_num_epochs=10,clean_dir=False):
 
     # create fol optax-based optimizer
     num_epochs = ifol_num_epochs
-    # learning_rate_scheduler = optax.linear_schedule(init_value=1e-4, end_value=1e-7, transition_steps=num_epochs)
-    # main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(learning_rate_scheduler))
     main_loop_transform = optax.chain(optax.adam(1e-5))
     latent_step_optimizer = optax.chain(optax.adam(1e-4))
 
@@ -119,22 +117,19 @@ def main(ifol_num_epochs=10,clean_dir=False):
 
     train_start_id = 0
     train_end_id = 20
-    test_start_id = 3*train_end_id
-    test_end_id = 3*train_end_id + 2
     # here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
     fol.Train(train_set=(coeffs_matrix[train_start_id:train_end_id,:],),
-            test_set=(coeffs_matrix[test_start_id:test_end_id,:],),
-            test_frequency=10,
-            batch_size=1,
-            convergence_settings={"num_epochs":num_epochs,
-                                    "relative_error":1e-100,
-                                    "absolute_error":1e-100},
-            working_directory=case_dir)
+                batch_size=1,
+                convergence_settings={"num_epochs":num_epochs,
+                                        "relative_error":1e-100,
+                                        "absolute_error":1e-100},
+                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":100},
+                working_directory=case_dir)
 
     # load teh best model
-    fol.RestoreState(restore_state_directory=case_dir+"/flax_final_state")
+    fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
-    for test in range(test_start_id,test_end_id):
+    for test in range(train_start_id,train_end_id):
         eval_id = test
         FOL_UV = np.array(fol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
         fe_mesh['U_FOL'] = FOL_UV.reshape((fe_mesh.GetNumberOfNodes(), 2))
@@ -170,7 +165,7 @@ def main(ifol_num_epochs=10,clean_dir=False):
 
 if __name__ == "__main__":
     # Initialize default values
-    ifol_num_epochs = 200
+    ifol_num_epochs = 5000
     clean_dir = False
 
     # Parse the command-line arguments

@@ -97,7 +97,7 @@ class DeepNetwork(ABC):
         self.checkpointer = ocp.StandardCheckpointer()
 
         # initialize the nnx optimizer
-        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer)
+        self.nnx_optimizer = nnx.Optimizer(self.flax_neural_network, self.optax_optimizer, wrt=nnx.Param)
 
     def GetName(self) -> str:
         """
@@ -111,28 +111,6 @@ class DeepNetwork(ABC):
         return self.name
     
     @abstractmethod
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        """
-        Computes the loss value for a single data point.
-
-        This method computes the network's output for a single input data point, 
-        applies the control parameters, and evaluates the loss function.
-
-        Parameters
-        ----------
-        x_set : Tuple[jnp.ndarray, jnp.ndarray]
-            A tuple containing the input data and corresponding target labels.
-        nn_model : nnx.Module
-            The Flax neural network model.
-
-        Returns
-        -------
-        jnp.ndarray
-            The loss value for the single data point.
-        """
-        pass
-    
-    @partial(nnx.jit, static_argnums=(0,))
     def ComputeBatchLossValue(self,batch_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
         """
         Computes the loss values for a batch of data.
@@ -153,21 +131,14 @@ class DeepNetwork(ABC):
         Tuple[jnp.ndarray, dict]
             The mean loss for the batch and a dictionary of loss statistics (min, max, avg, total).
         """
-
-        batch_losses,(batch_mins,batch_maxs,batch_avgs) = nnx.vmap(self.ComputeSingleLossValue,in_axes=(0, None),out_axes=0)(batch_set,nn_model)
-        loss_name = self.loss_function.GetName()
-        total_mean_loss = jnp.mean(batch_losses)
-        return total_mean_loss, ({loss_name+"_min":jnp.min(batch_mins),
-                                         loss_name+"_max":jnp.max(batch_maxs),
-                                         loss_name+"_avg":jnp.mean(batch_avgs),
-                                         "total_loss":total_mean_loss})
+        pass
 
     @partial(nnx.jit, static_argnums=(0,))
     def TrainStep(self, state, data):
         nn, opt = state
         (_,batch_dict), batch_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1,has_aux=True) \
                                                                     (data,nn)
-        opt.update(batch_grads)
+        opt.update(nn,batch_grads)
         return batch_dict["total_loss"]
     
     @partial(nnx.jit, static_argnums=(0,))
@@ -175,6 +146,9 @@ class DeepNetwork(ABC):
         nn,_ = state
         (_,batch_dict) = self.ComputeBatchLossValue(data,nn)
         return batch_dict["total_loss"]
+
+    def GetState(self):
+        return (self.flax_neural_network, self.nnx_optimizer)
 
     @print_with_timestamp_and_execution_time
     def Train(self, 
@@ -283,11 +257,11 @@ class DeepNetwork(ABC):
             converged = False
             rng, _ = jax.random.split(jax.random.PRNGKey(0))
 
-            state = (self.flax_neural_network, self.nnx_optimizer)
+            state = self.GetState()
 
             # Most powerful chicken seasoning taken from https://gist.github.com/puct9/35bb1e1cdf9b757b7d1be60d51a2082b 
             # and discussions in https://github.com/google/flax/issues/4045
-            train_multiple_steps_with_idxs = nnx.jit(lambda st, dat, idxs: nnx.scan(lambda st, idxs: (st, self.TrainStep(st, jax.tree.map(lambda a: a[idxs], dat))))(st, idxs))    
+            train_multiple_steps_with_idxs = nnx.jit(lambda st, dat, idxs: nnx.scan(lambda st, idxs: (st, self.TrainStep(st, jax.tree.map(lambda a: a[idxs], dat))))(st, idxs), donate_argnums=(0, 1),)    
 
             for epoch in pbar:
                 # update least values in case of restore

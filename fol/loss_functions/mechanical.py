@@ -6,7 +6,6 @@
 from  .fe_loss import FiniteElementLoss
 import jax
 import jax.numpy as jnp
-from jax import jit
 from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
@@ -35,7 +34,6 @@ class MechanicalLoss(FiniteElementLoss):
             if "body_foce" in self.loss_settings:
                 self.body_force = jnp.array(self.loss_settings["body_foce"])
 
-    @partial(jit, static_argnums=(0,))
     def CalculateBMatrix2D(self,DN_DX:jnp.array) -> jnp.array:
         B = jnp.zeros((3, 2 * DN_DX.shape[0]))
         indices = jnp.arange(DN_DX.shape[0])
@@ -45,7 +43,6 @@ class MechanicalLoss(FiniteElementLoss):
         B = B.at[2, 2 * indices + 1].set(DN_DX[indices,0])  
         return B
 
-    @partial(jit, static_argnums=(0,))
     def CalculateBMatrix3D(self,DN_DX:jnp.array) -> jnp.array:
         B = jnp.zeros((6,3*DN_DX.shape[0]))
         index = jnp.arange(DN_DX.shape[0]) * 3
@@ -84,7 +81,6 @@ class MechanicalLoss(FiniteElementLoss):
             D = D.at[5,5].set(c4)
             return D
     
-    @partial(jit, static_argnums=(0,))
     def CalculateNMatrix2D(self,N_vec:jnp.array) -> jnp.array:
         N_mat = jnp.zeros((2, 2 * N_vec.size))
         indices = jnp.arange(N_vec.size)   
@@ -92,7 +88,6 @@ class MechanicalLoss(FiniteElementLoss):
         N_mat = N_mat.at[1, 2 * indices + 1].set(N_vec)    
         return N_mat
     
-    @partial(jit, static_argnums=(0,))
     def CalculateNMatrix3D(self,N_vec:jnp.array) -> jnp.array:
         N_mat = jnp.zeros((3,3*N_vec.size))
         N_mat = N_mat.at[0,0::3].set(N_vec)
@@ -100,9 +95,8 @@ class MechanicalLoss(FiniteElementLoss):
         N_mat = N_mat.at[2,2::3].set(N_vec)
         return N_mat
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,uvwe):
-        @jit
+
         def compute_at_gauss_point(gp_point,gp_weight):
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
             N_mat = self.CalculateNMatrix(N_vec)

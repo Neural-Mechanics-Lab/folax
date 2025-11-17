@@ -2,7 +2,6 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..','..')))
 import jax
-jax.config.update("jax_platform_name","cpu")
 import numpy as np
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss2DQuad
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
@@ -22,7 +21,7 @@ from fol.tools.decoration_functions import *
 
 def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "ifol_output_NiN"
+    working_directory_name = "nn_output_NiN"
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
@@ -173,7 +172,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
 
     U_dict = {}
     for eval_id in tests:
-        ifol_uvw = np.array(ifol.Predict(K_matrix[otf_id].reshape(-1,1).T))
+        ifol_uvw = np.array(ifol.Predict(coeffs_matrix[otf_id].reshape(-1,1).T))
         fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
         fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
 
@@ -181,7 +180,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
         if solve_FE:
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                         "nonlinear_solver_settings":{"rel_tol":1e-7,"abs_tol":1e-7,
-                                                        "maxiter":8,"load_incr":51}}
+                                                        "maxiter":8,"load_incr":31}}
             nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_2d,fe_setting)
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(K_matrix[eval_id,:],np.zeros(2*fe_mesh.GetNumberOfNodes())))  
@@ -211,11 +210,15 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
             try:    
                 NiN_UVW = np.array(nin_nonlin_fe_solver.Solve(K_matrix[eval_id,:],ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes())))  
             except Exception as e:
-                print(f"Error occured {type(e).__name__}")
+                print(f"Error occured {type(e).__name__}: e")
                 NiN_UVW = np.zeros(2*fe_mesh.GetNumberOfNodes())
 
             fe_mesh[f'NiN_U_{eval_id}'] = NiN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
+
+            plot_iFOL_HFE(topology_field=K_matrix[eval_id,:], ifol_sol_field=ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes()), hfe_sol_field=NiN_UVW,
+                     err_sol_field=abs_err, file_name=os.path.join(case_dir,'plots')+f"/ifol_fe-nin_error_{eval_id}",
+                     fig_titles=['Elasticity Morph.','iFOL','FE-NIN','iFOL-FE Abs Diff.'])
 
 
     fe_mesh.Finalize(export_dir=case_dir)
@@ -227,9 +230,9 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
 
 if __name__ == "__main__":
     # Initialize default values
-    ifol_num_epochs = 3000
+    ifol_num_epochs = 5000
     solve_FE = True
-    solve_NiN = False
+    solve_NiN = True
     clean_dir = False
 
     # Parse the command-line arguments

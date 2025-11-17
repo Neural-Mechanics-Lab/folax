@@ -24,7 +24,6 @@ class IdentityControl(Control):
         self.num_control_vars = self.num_vars
         self.num_controlled_vars = self.num_vars
 
-    @partial(jit, static_argnums=(0,))
     def ComputeControlledVariables(self,variable_vector:jnp.array):
         return variable_vector
 

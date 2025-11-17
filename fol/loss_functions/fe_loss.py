@@ -51,7 +51,7 @@ class FiniteElementLoss(Loss):
             self.dirichlet_indices = jnp.concatenate(dirichlet_indices)
             self.dirichlet_values = jnp.concatenate(dirichlet_values)
         else:
-            self.dirichlet_indices = jnp.array([])
+            self.dirichlet_indices = jnp.array([], dtype=jnp.int32)
             self.dirichlet_values = jnp.array([])
 
         all_indices = jnp.arange(number_dofs_per_node*self.fe_mesh.GetNumberOfNodes())
@@ -67,12 +67,6 @@ class FiniteElementLoss(Loss):
         self.total_number_of_dofs = len(self.dofs) * self.fe_mesh.GetNumberOfNodes()
         self.__CreateDofsDict(self.dofs,self.loss_settings["dirichlet_bc_dict"])
         self.number_of_unknown_dofs = self.non_dirichlet_indices.size
-
-        # create full solution vector
-        self.solution_vector = jnp.zeros(self.total_number_of_dofs)
-        # apply dirichlet bcs
-        if self.dirichlet_indices.size > 0:
-            self.solution_vector = self.solution_vector.at[self.dirichlet_indices].set(self.dirichlet_values)
 
         # fe element
         self.fe_element = fe_element_dict[self.element_type]
@@ -98,18 +92,11 @@ class FiniteElementLoss(Loss):
 
         self.dim = self.loss_settings["compute_dims"]
 
-        @jit
-        def ConstructFullDofVector(full_control_params: jnp.array,unknown_dofs: jnp.array):
-            solution_vector = jnp.zeros(self.total_number_of_dofs)
-            solution_vector = self.solution_vector.at[self.non_dirichlet_indices].set(unknown_dofs)
-            return full_control_params.reshape(-1,1), solution_vector
+        def ConstructFullDofVector(known_dofs: jnp.array,all_dofs: jnp.array):
+            return all_dofs.at[:,self.dirichlet_indices].set(self.dirichlet_values)
 
-        @jit
-        def ConstructFullDofVectorParametricLearning(full_control_params: jnp.array,unknown_dofs: jnp.array):
-            solution_vector = jnp.zeros(self.total_number_of_dofs)
-            solution_vector = solution_vector.at[self.dirichlet_indices].set(full_control_params)
-            solution_vector = solution_vector.at[self.non_dirichlet_indices].set(unknown_dofs)
-            return self.K_matrix.reshape(-1,1), solution_vector  
+        def ConstructFullDofVectorParametricLearning(known_dofs: jnp.array,all_dofs: jnp.array):
+            return all_dofs.at[:,self.dirichlet_indices].set(known_dofs)
 
         if self.loss_settings.get("parametric_boundary_learning"):
             self.full_dof_vector_function = ConstructFullDofVectorParametricLearning
@@ -136,9 +123,8 @@ class FiniteElementLoss(Loss):
 
         self.initialized = True
 
-    @partial(jit, static_argnums=(0,))
-    def GetFullDofVector(self,full_control_params: jnp.array,unknown_dofs: jnp.array) -> jnp.array:
-        return self.full_dof_vector_function(full_control_params,unknown_dofs)
+    def GetFullDofVector(self,known_dofs: jnp.array,unknown_dofs: jnp.array) -> jnp.array:
+        return self.full_dof_vector_function(known_dofs,unknown_dofs)
 
     def Finalize(self) -> None:
         pass
@@ -159,14 +145,12 @@ class FiniteElementLoss(Loss):
                        elem_dofs:jnp.array) -> tuple[float, jnp.array, jnp.array]:
         pass
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementEnergy(self,
                              elem_xyz:jnp.array,
                              elem_controls:jnp.array,
                              elem_dofs:jnp.array) -> float:
         return self.ComputeElement(elem_xyz,elem_controls,elem_dofs)[0]
     
-    @partial(jit, static_argnums=(0,))
     def ComputeElementEnergyVmapCompatible(self,
                                            element_id:jnp.integer,
                                            elements_nodes:jnp.array,
@@ -178,7 +162,6 @@ class FiniteElementLoss(Loss):
                                          full_dof_vector[((self.number_dofs_per_node*elements_nodes[element_id])[:, jnp.newaxis] +
                                          jnp.arange(self.number_dofs_per_node))].reshape(-1,1))
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementsEnergies(self,total_control_vars:jnp.array,total_primal_vars:jnp.array):
         # parallel calculation of energies
         return jax.vmap(self.ComputeElementEnergyVmapCompatible,(0,None,None,None,None)) \
@@ -188,11 +171,9 @@ class FiniteElementLoss(Loss):
                         total_control_vars,
                         total_primal_vars)
 
-    @partial(jit, static_argnums=(0,))
     def ComputeTotalEnergy(self,total_control_vars:jnp.array,total_primal_vars:jnp.array):
         return jnp.sum(self.ComputeElementsEnergies(total_control_vars,total_primal_vars)) 
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementJacobianIndices(self,nodes_ids:jnp.array):
         nodes_ids *= self.number_dofs_per_node
         nodes_ids += jnp.arange(self.number_dofs_per_node).reshape(-1,1)
@@ -206,7 +187,6 @@ class FiniteElementLoss(Loss):
     def ApplyDirichletBCOnDofVector(self,full_dof_vector:jnp.array,load_increment:float=1.0):
         return full_dof_vector.at[self.dirichlet_indices].set(load_increment*self.dirichlet_values)
 
-    @partial(jit, static_argnums=(0,))
     def ApplyDirichletBCOnElementResidualAndJacobian(self,
                                                      elem_res:jnp.array,
                                                      elem_jac:jnp.array,
@@ -225,7 +205,6 @@ class FiniteElementLoss(Loss):
 
         return   BC_matrix @ elem_res, BC_matrix @ elem_jac + mask_BC_matrix
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobian(self,
                                           elem_xyz:jnp.array,
                                           elem_controls:jnp.array,
@@ -249,7 +228,6 @@ class FiniteElementLoss(Loss):
 
         return self.ApplyDirichletBCOnElementResidualAndJacobian(re,ke,elem_BC,elem_mask_BC)
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElementResidualAndJacobianVmapCompatible(self,element_id:jnp.integer,
                                                         elements_nodes:jnp.array,
                                                         xyz:jnp.array,
@@ -268,18 +246,20 @@ class FiniteElementLoss(Loss):
                                                       jnp.arange(self.number_dofs_per_node))].reshape(-1,1),
                                                       transpose_jac)
 
-    @partial(jit, static_argnums=(0,))
-    def ComputeSingleLoss(self,full_control_params:jnp.array,unknown_dofs:jnp.array):
-        # elems_energies = self.ComputeElementsEnergies(full_control_params.reshape(-1,1),
-        #                                               self.GetFullDofVector(full_control_params,
-        #                                                                     unknown_dofs))
-        elems_energies = self.ComputeElementsEnergies(*self.GetFullDofVector(full_control_params,unknown_dofs))
-        # some extra calculation for reporting and not traced
-        avg_elem_energy = jax.lax.stop_gradient(jnp.mean(elems_energies))
-        max_elem_energy = jax.lax.stop_gradient(jnp.max(elems_energies))
-        min_elem_energy = jax.lax.stop_gradient(jnp.min(elems_energies))
-        return jnp.sum(elems_energies)**self.loss_function_exponent,(min_elem_energy,max_elem_energy,avg_elem_energy)
-    
+    def ComputeBatchLoss(self,batch_params:jnp.array,batch_dofs:jnp.array):
+        batch_params = jnp.atleast_2d(batch_params)
+        batch_params = batch_params.reshape(batch_params.shape[0], -1)
+        batch_dofs = jnp.atleast_2d(batch_dofs)
+        batch_dofs = batch_dofs.reshape(batch_dofs.shape[0], -1)
+        BC_applied_batch_dofs = self.GetFullDofVector(batch_params,batch_dofs)
+
+        def ComputeSingleLoss(params,dofs):
+            return jnp.sum(self.ComputeElementsEnergies(params,dofs))**self.loss_function_exponent
+
+        batch_energies = jax.vmap(ComputeSingleLoss)(batch_params,BC_applied_batch_dofs)
+
+        return jnp.mean(batch_energies),(jnp.min(batch_energies),jnp.max(batch_energies),jnp.mean(batch_energies))
+
     @print_with_timestamp_and_execution_time
     @partial(jit, static_argnums=(0,))
     def ComputeJacobianMatrixAndResidualVector(self,total_control_vars: jnp.array,total_primal_vars: jnp.array,transpose_jacobian:bool=False,new_implementation:bool=False):
@@ -298,7 +278,7 @@ class FiniteElementLoss(Loss):
         template_elem_jac_indices = jnp.arange(0,self.adjusted_batch_size*element_matrix_size*element_matrix_size)
 
         residuals_vector = jnp.zeros((self.total_number_of_dofs))
-        @jax.jit
+
         def fill_arrays(batch_index,batch_arrays):
             glob_res_vec,elem_jac_vec = batch_arrays
 

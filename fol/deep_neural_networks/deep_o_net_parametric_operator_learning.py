@@ -43,28 +43,39 @@ class DeepONetParametricOperatorLearning(DeepNetwork):
 
         self.initialized = True
 
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
+        return nn_model(batch_X,self.loss_function.fe_mesh.GetNodesCoordinates()).reshape(batch_X.shape[0],-1)
+
     @print_with_timestamp_and_execution_time
-    def Predict(self,batch_control:jnp.ndarray):
-        batch_X = jax.vmap(self.control.ComputeControlledVariables)(batch_control)
-        batch_Y =jax.vmap(self.flax_neural_network,(0,None))(batch_X,self.loss_function.fe_mesh.GetNodesCoordinates())
-        batch_Y = batch_Y.reshape(batch_X.shape[0], -1)[:,self.loss_function.non_dirichlet_indices]
-        return jax.vmap(self.loss_function.GetFullDofVector)(batch_X,batch_Y)
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
+    def Predict(self,batch_X):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
+        preds = self.ComputeBatchPredictions(control_outputs,self.flax_neural_network)
+        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
 
     def Finalize(self):
         pass
 
 class DataDrivenDeepONetParametricOperatorLearning(DeepONetParametricOperatorLearning):
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        nn_output = nn_model(control_output,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(x_set[1],nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(batch[1],batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})
     
 class PhysicsInformedDeepONetParametricOperatorLearning(DeepONetParametricOperatorLearning):
 
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        nn_output = nn_model(control_output,self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()[self.loss_function.non_dirichlet_indices]
-        return self.loss_function.ComputeSingleLoss(control_output.flatten(),nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})

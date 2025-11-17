@@ -92,52 +92,29 @@ class ExplicitParametricOperatorLearning(DeepNetwork):
         if self.flax_neural_network.out_features != self.loss_function.GetNumberOfUnknowns():
             fol_error(f"the size of the output layer is {self.flax_neural_network.out_features} " \
                       f" does not match the size of unknowns of the loss function {self.loss_function.GetNumberOfUnknowns()}")
+
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,nn_model:nnx.Module):
+        return nn_model(batch_X)
     
-    @partial(nnx.jit, static_argnums=(0,))
-    def ComputeSingleLossValue(self,x_set:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        """
-        Computes the loss value for a single data point.
-
-        This method computes the network's output for a single input data point, 
-        applies the control parameters, and evaluates the loss function.
-
-        Parameters
-        ----------
-        x_set : Tuple[jnp.ndarray, jnp.ndarray]
-            A tuple containing the input data and corresponding target labels.
-        nn_model : nnx.Module
-            The Flax neural network model.
-
-        Returns
-        -------
-        jnp.ndarray
-            The loss value for the single data point.
-        """
-        nn_output = nn_model(x_set[0])
-        control_output = self.control.ComputeControlledVariables(x_set[0])
-        return self.loss_function.ComputeSingleLoss(control_output,nn_output)
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_unknowns_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
+        batch_full_pred = jnp.zeros((batch[0].shape[0],self.loss_function.GetTotalNumberOfDOFs()))
+        batch_full_pred = batch_full_pred.at[:,self.loss_function.non_dirichlet_indices].set(batch_unknowns_predictions)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_full_pred)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})
 
     @print_with_timestamp_and_execution_time
-    @partial(jit, static_argnums=(0,))
+    @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def Predict(self,batch_X):
-        """
-        Generates predictions for a batch of input data.
-
-        This method computes the network's predictions for a batch of input data. 
-        It maps the network outputs to the full degree of freedom (DoF) vector using the loss function.
-
-        Parameters
-        ----------
-        batch_X : jnp.ndarray
-            A batch of input data.
-
-        Returns
-        -------
-        jnp.ndarray
-            The predicted outputs, mapped to the full DoF vector.
-        """
-        batch_Y = self.flax_neural_network(batch_X)
-        return vmap(self.loss_function.GetFullDofVector)(batch_X,batch_Y)[1]
+        batch_unknowns_predictions = self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
+        batch_full_pred = jnp.zeros((batch_X.shape[0],self.loss_function.GetTotalNumberOfDOFs()))
+        batch_full_pred = batch_full_pred.at[:,self.loss_function.non_dirichlet_indices].set(batch_unknowns_predictions)
+        return self.loss_function.GetFullDofVector(batch_X,batch_full_pred.reshape(batch_full_pred.shape[0], -1))
 
     def Finalize(self):
         pass

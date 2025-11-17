@@ -115,22 +115,19 @@ def main(ifol_num_epochs=10,clean_dir=False):
 
     train_start_id = 0
     train_end_id = 20
-    test_start_id = 3*train_end_id
-    test_end_id = 3*train_end_id + 2
     # here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
     fol.Train(train_set=(coeffs_matrix[train_start_id:train_end_id,:],),
-            test_set=(coeffs_matrix[test_start_id:test_end_id,:],),
-            test_frequency=10,
-            batch_size=1,
-            convergence_settings={"num_epochs":num_epochs,
-                                    "relative_error":1e-100,
-                                    "absolute_error":1e-100},
-            working_directory=case_dir)
+                batch_size=1,
+                convergence_settings={"num_epochs":num_epochs,
+                                        "relative_error":1e-100,
+                                        "absolute_error":1e-100},
+                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":100},
+                working_directory=case_dir)
 
     # load teh best model
-    fol.RestoreState(restore_state_directory=case_dir+"/flax_final_state")
+    fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
-    for test in range(test_start_id,test_end_id):
+    for test in range(train_start_id,train_end_id):
         eval_id = test
         FOL_UV = np.array(fol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
         fe_mesh['U_FOL'] = FOL_UV.reshape((fe_mesh.GetNumberOfNodes(), 2))
@@ -166,7 +163,7 @@ def main(ifol_num_epochs=10,clean_dir=False):
 
 if __name__ == "__main__":
     # Initialize default values
-    ifol_num_epochs = 200
+    ifol_num_epochs = 5000
     clean_dir = False
 
     # Parse the command-line arguments

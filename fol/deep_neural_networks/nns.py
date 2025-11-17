@@ -188,7 +188,7 @@ class MLP(nnx.Module):
         key = random.PRNGKey(0)
         keys = random.split(key, len(layer_sizes) - 1)
 
-        self.nn_params = []
+        self.nn_params = nnx.List([])
         self.total_num_weights = 0
         self.total_num_biases = 0
         for i, (in_dim, out_dim) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):
@@ -674,6 +674,6 @@ class HyperNetwork(nnx.Module):
     
     def __call__(self, latent_array: jax.Array,coord_matrix: jax.Array):
         if self.coupling_settings["modulator_to_synthesizer_coupling_mode"] == "one_modulator_per_synthesizer_layer":
-            return self.fw_func(latent_array,coord_matrix,self.modulator_nns,self.synthesizer_nn)
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nns,self.synthesizer_nn)
         else:
-            return self.fw_func(latent_array,coord_matrix,self.modulator_nn,self.synthesizer_nn)
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nn,self.synthesizer_nn)

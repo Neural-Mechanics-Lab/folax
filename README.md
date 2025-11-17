@@ -1,4 +1,4 @@
-<p align=center><img height="54.125%" width="54.125%" src="https://github.com/RezaNajian/eFOL/assets/62375973/0e1ca4e0-0658-4f5d-aad9-1ae7c9f67574"></p>
+<p align=center><img height="40.0%" width="40.0%" src="https://github.com/user-attachments/assets/c1759ba8-be9a-48d8-b733-4264e34f411f"></p>
 
 [![License][license-image]][license] 
 [![CI](https://github.com/RezaNajian/folax/actions/workflows/CI.yml/badge.svg)](https://github.com/RezaNajian/folax/actions/workflows/CI.yml)

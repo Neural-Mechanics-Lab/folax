@@ -6,7 +6,6 @@
 from  .fe_loss import FiniteElementLoss
 import jax
 import jax.numpy as jnp
-from jax import jit
 from functools import partial
 from fol.tools.decoration_functions import *
 from fol.tools.fem_utilities import *
@@ -26,9 +25,8 @@ class ThermalLoss(FiniteElementLoss):
         if "c" in self.loss_settings.keys():
             self.thermal_loss_settings["c"] = self.loss_settings["c"]
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,te,body_force=0):
-        @jit
+
         def compute_at_gauss_point(gp_point,gp_weight,te):
             te = jax.lax.stop_gradient(te)
             N = self.fe_element.ShapeFunctionsValues(gp_point)

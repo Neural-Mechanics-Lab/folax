@@ -113,12 +113,12 @@ fol.Initialize()
 
 
 train_start_id = 0
-train_end_id = 2
+train_end_id = 20
 # here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
 fol.Train(train_set=(coeffs_matrix[train_start_id:train_end_id,:],),batch_size=1,
             convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
             plot_settings={"plot_save_rate":100},
-            train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":100,"state_directory":case_dir+"flax_train_state"},
+            train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":100},
             working_directory=case_dir)
 
 # load teh best model

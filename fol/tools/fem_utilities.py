@@ -12,6 +12,7 @@ import jax.numpy as jnp
 from jax import jit
 from functools import partial
 import jax
+import jax
 
 class ConstantsMeta(type):
     def __setattr__(self, key, value):
@@ -583,6 +584,99 @@ class NeoHookianModel2DAD(MaterialModel):
             J = jnp.sqrt(jnp.linalg.det(C))
             return 0.5*mu*(jnp.linalg.trace(C) - 2) - mu*jnp.log(J) + 0.5*lambda_*(jnp.log(J)**2)
             # return 0.5*mu*((J**(-1))*jnp.linalg.trace(C) - 2) - mu*jnp.log(J) + 0.5*lambda_*(jnp.log(J)**2)
+        
+        def strain_energy_paper(C_voigt):
+            C = self.VoigtToTensor(C_voigt)
+            J = jnp.sqrt(jnp.linalg.det(C))
+            return (k/4)*(J**2 - 2*jnp.log(J) -1) + 0.5*mu*((J**(-2/2))*jnp.trace(C) - 2)
+        
+        def second_piola(C_voigt):
+            return 2*jax.grad(strain_energy)(C_voigt)
+        
+        def tangent(C_voigt):
+            return 2*jax.jacfwd(second_piola)(C_voigt)
+        
+        # C_mat = jnp.dot(F.T,F)
+        C_voigt = self.TensorToVoigt(C_mat)
+
+        xsie = strain_energy(C_voigt)
+        Se_voigt = second_piola(C_voigt)
+        C_tangent = tangent(C_voigt)
+        return xsie, Se_voigt, C_tangent.squeeze()
+    
+class NeoHookianModelAD(MaterialModel):
+    """
+    Material model.
+    """
+    @partial(jit, static_argnums=(0,))
+    def evaluate(self, C_mat, k, mu, lambda_, *args, **keyargs):
+        """
+        Evaluate the stress and tangent operator at given local coordinates.
+        This method should be overridden by subclasses.
+
+        Parameters:
+        F (ndarray): Deformation gradient.
+        args (float): Optional material constants
+
+        Returns:
+        jnp.ndarray: Values of stress and tangent operator at given local coordinates.
+        """
+
+        def strain_energy(C_voigt):
+            C = self.VoigtToTensor(C_voigt)
+            J = jnp.sqrt(jnp.linalg.det(C))
+            xsie_vol = (k/4)*(J**2 - 2*jnp.log(J) -1)
+            I1_bar = (J**(-2/3))*jnp.trace(C)
+            xsie_iso = 0.5*mu*(I1_bar - 3)
+            return 0.5*mu*(I1_bar - 3) - mu*jnp.log(J) + (lambda_/2)*(jnp.log(J))**2
+        
+        def strain_energy_paper(C_voigt):
+            C = self.VoigtToTensor(C_voigt)
+            J = jnp.sqrt(jnp.linalg.det(C))
+            xsie_vol = (k/4)*(J**2 - 2*jnp.log(J) -1)
+            I1_bar = (J**(-2/3))*jnp.trace(C)
+            xsie_iso = 0.5*mu*(I1_bar - 3)
+            return xsie_vol + xsie_iso
+        
+        def second_piola(C_voigt):
+            return 2*jax.grad(strain_energy)(C_voigt)
+        
+        def tangent(C_voigt):
+            return 2*jax.jacfwd(second_piola)(C_voigt)
+        
+        C_voigt = self.TensorToVoigt(C_mat)
+
+        xsie = strain_energy(C_voigt)
+        Se_voigt = second_piola(C_voigt)
+        C_tangent = tangent(C_voigt)
+
+        return xsie, Se_voigt, C_tangent.squeeze()
+    
+class NeoHookianModel2DAD(MaterialModel):
+    """
+    Material model.
+    """
+    @partial(jit, static_argnums=(0,))
+    def evaluate(self, C_mat, k, mu, lambda_, *args, **keyargs):
+        """
+        Evaluate the stress and tangent operator at given local coordinates.
+        This method should be overridden by subclasses.
+
+        Parameters:
+        F (ndarray): Deformation gradient.
+        args (float): Optional material constants
+
+        Returns:
+        jnp.ndarray: Values of stress and tangent operator at given local coordinates.
+        """
+        # Supporting functions:
+        # Strain Energy
+
+        def strain_energy(C_voigt):
+            C = self.VoigtToTensor(C_voigt)
+            J = jnp.sqrt(jnp.linalg.det(C))
+            return 0.5*mu*(jnp.linalg.trace(C) - 2) - mu*jnp.log(J) + 0.5*lambda_*(jnp.log(J)**2)
+
         
         def strain_energy_paper(C_voigt):
             C = self.VoigtToTensor(C_voigt)

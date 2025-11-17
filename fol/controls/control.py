@@ -48,13 +48,11 @@ class Control(ABC):
         """
         pass
 
-    @print_with_timestamp_and_execution_time     
-    @partial(jit, static_argnums=(0,))
     def ComputeBatchControlledVariables(self,batch_variable_vector:jnp.array) -> None:
         """Computes the controlled variables for the given batch variables.
 
         """
-        return jnp.squeeze(jax.vmap(self.ComputeControlledVariables,(0))(batch_variable_vector))
+        return jax.vmap(self.ComputeControlledVariables,(0))(batch_variable_vector)
 
     @partial(jit, static_argnums=(0,))
     def ComputeJacobian(self,control_vec):

@@ -18,13 +18,13 @@ from mechanical3d_utilities import *
 
 def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "ifol_output_3D_tetra_cruciform_SVK_train"
+    working_directory_name = "nn_output_3D_tetra_cruciform_saint_venant"
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     #call the function to create the mesh
-    fe_mesh = Mesh("fol_io","cruciform_fine.med",os.path.join('.','..','..','meshes'))
+    fe_mesh = Mesh("fol_io","cruciform_fine.med",os.path.join(os.path.dirname(__file__),'..','..','meshes'))
     fe_mesh.Initialize()
 
     # creation of fe model and loss function
@@ -65,9 +65,9 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         "skip_connections_settings": {"active":False,"frequency":1},
         "latent_size":  8*64,
         "modulator_bias": False,
-        "main_loop_transform": 1e-5,
+        "main_loop_transform": 1e-4,
         "latent_step_optimizer": 1e-4,
-        "ifol_nn_latent_step_size": 1e-4
+        "ifol_nn_latent_step_size": 1e-2
     }
     
     characteristic_length = ifol_settings_dict["characteristic_length"]
@@ -131,7 +131,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # test_set_pr = K_matrix[test_start_id,test_end_id]
     test_set_pr = coeffs_matrix[test_start_id:test_end_id,:]
     
-    train_settings_dict = {"batch_size": 100,
+    train_settings_dict = {"batch_size": 1,
                             "num_epoch":ifol_num_epochs,
                             "parametric_learning": False,
                             "OTF_id": eval_id,
@@ -165,7 +165,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
 
     # load teh best model
-    ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
+    # ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
    
     for eval_id in tests:
         iFOL_UVW = np.array(ifol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
@@ -211,7 +211,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
 if __name__ == "__main__":
     # Initialize default values
-    ifol_num_epochs = 5
+    ifol_num_epochs = 5000
     solve_FE = True
     clean_dir = False
 

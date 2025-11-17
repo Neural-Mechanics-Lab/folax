@@ -1,10 +1,13 @@
 import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
 import optax
 from flax import nnx
 import jax
 import numpy as np
 from fol.loss_functions.mechanical import MechanicalLoss2DQuad
+from fol.loss_functions.ifol_outputs_neohooke_AD.mechanical_neohooke_AD import NeoHookeMechanicalLoss2DQuad
+from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.mesh_input_output.mesh import Mesh
 from fol.controls.voronoi_control2D import VoronoiControl2D
 from fol.deep_neural_networks.explicit_parametric_operator_learning import ExplicitParametricOperatorLearning
@@ -14,25 +17,25 @@ from fol.tools.logging_functions import Logger
 
 def main(fol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = 'mechanical_2D_poly_lin'
+    working_directory_name = 'mechanical_2D_poly_nonlin_AD'
     case_dir = os.path.join('.', working_directory_name)
     create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
     
     # problem setup
-    model_settings = {"L":1,"N":10,
+    model_settings = {"L":1,"N":2,
                     "Ux_left":0.0,"Ux_right":0.05,
                     "Uy_left":0.0,"Uy_right":0.05}
 
     # creation of the model
-    fe_mesh = create_2D_square_mesh(L=1,N=10)
+    fe_mesh = create_2D_square_mesh(L=1,N=2)
 
     # create fe-based loss function
     bc_dict = {"Ux":{"left":model_settings["Ux_left"],"right":model_settings["Ux_right"]},
                "Uy":{"left":model_settings["Uy_left"],"right":model_settings["Uy_right"]}}
     
     material_dict = {"young_modulus":1,"poisson_ratio":0.3}
-    mechanical_loss_2d = MechanicalLoss2DQuad("mechanical_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,
+    mechanical_loss_2d = NeoHookeMechanicalLoss2DQuad("mechanical_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,
                                                                               "num_gp":2,
                                                                               "material_dict":material_dict},
                                                                               fe_mesh=fe_mesh)
@@ -47,15 +50,16 @@ def main(fol_num_epochs=10,solve_FE=False,clean_dir=False):
     voronoi_control.Initialize()
 
     # create some random coefficients & K for training
-    number_of_random_samples = 100
+    number_of_random_samples = 1
     coeffs_matrix,K_matrix = create_random_voronoi_samples(voronoi_control,number_of_random_samples)
+    K_matrix = np.ones_like(K_matrix)
 
     # now save K matrix 
     solution_file = os.path.join(case_dir, "K_matrix.txt")
     np.savetxt(solution_file,K_matrix)
 
     # specify id of the K of interest
-    eval_id = 25
+    eval_id = 0
 
     # design NN for learning
     class MLP(nnx.Module):
@@ -85,36 +89,38 @@ def main(fol_num_epochs=10,solve_FE=False,clean_dir=False):
                                             flax_neural_network=fol_net,
                                             optax_optimizer=chained_transform)
     
-    fol.Initialize()
+    # fol.Initialize()
 
-    fol.Train(train_set=(coeffs_matrix[eval_id].reshape(-1,1).T,),
-                        convergence_settings={"num_epochs":fol_num_epochs,
-                                              "relative_error":1e-10},
-                        working_directory=case_dir)
+    # fol.Train(train_set=(coeffs_matrix[eval_id].reshape(-1,1).T,),
+    #                     convergence_settings={"num_epochs":fol_num_epochs,
+    #                                           "relative_error":1e-10},
+    #                     working_directory=case_dir)
 
-    FOL_UV = np.array(fol.Predict(coeffs_matrix[eval_id].reshape(-1,1).T)).reshape(-1)
-    fe_mesh['U_FOL'] = FOL_UV.reshape((fe_mesh.GetNumberOfNodes(), 2))
+    # FOL_UV = np.array(fol.Predict(coeffs_matrix[eval_id].reshape(-1,1).T)).reshape(-1)
+    # fe_mesh['U_FOL'] = FOL_UV.reshape((fe_mesh.GetNumberOfNodes(), 2))
 
     # solve FE here
     if solve_FE:
-        fe_setting = {"linear_solver_settings":{"solver":"JAX-bicgstab","tol":1e-6,"atol":1e-6,
+        fe_setting = {"linear_solver_settings":{"solver":"JAX-direct","tol":1e-6,"atol":1e-6,
                                                     "maxiter":1000,"pre-conditioner":"ilu"},
                       "nonlinear_solver_settings":{"rel_tol":1e-5,"abs_tol":1e-5,
-                                                    "maxiter":10,"load_incr":5}}
-        linear_fe_solver = FiniteElementLinearResidualBasedSolver("linear_fe_solver",mechanical_loss_2d,fe_setting)
-        linear_fe_solver.Initialize()
-        FE_UV = np.array(linear_fe_solver.Solve(K_matrix[eval_id],np.zeros(2*fe_mesh.GetNumberOfNodes())))  
+                                                    "maxiter":10,"load_incr":5},
+                                                    "output_directory":case_dir}
+
+        nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_2d,fe_setting)
+        nonlin_fe_solver.Initialize()
+        FE_UV = np.array(nonlin_fe_solver.Solve(K_matrix,np.zeros(2*fe_mesh.GetNumberOfNodes())))  
         fe_mesh['U_FE'] = FE_UV.reshape((fe_mesh.GetNumberOfNodes(), 2))
 
-        absolute_error = abs(FOL_UV.reshape(-1,1)- FE_UV.reshape(-1,1))
-        fe_mesh['abs_error'] = absolute_error.reshape((fe_mesh.GetNumberOfNodes(), 2))
+        # absolute_error = abs(FOL_UV.reshape(-1,1)- FE_UV.reshape(-1,1))
+        # fe_mesh['abs_error'] = absolute_error.reshape((fe_mesh.GetNumberOfNodes(), 2))
 
-        vectors_list = [K_matrix[eval_id],FE_UV[::2],FOL_UV[::2]]
-        plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_U.png'),dir="U")
+        # vectors_list = [K_matrix[eval_id],FE_UV[::2],FOL_UV[::2]]
+        # plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_U.png'),dir="U")
         # plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_U.png'), loss_settings=material_dict)
         
-        vectors_list = [K_matrix[eval_id],FE_UV[1::2],FOL_UV[1::2]]
-        plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_V.png'),dir="V")
+        # vectors_list = [K_matrix[eval_id],FE_UV[1::2],FOL_UV[1::2]]
+        # plot_mesh_res(vectors_list, file_name=os.path.join(case_dir,'plot_V.png'),dir="V")
         # plot_mesh_grad_res_mechanics(vectors_list, file_name=os.path.join(case_dir,'plot_stress_V.png'), loss_settings=material_dict)
         
     

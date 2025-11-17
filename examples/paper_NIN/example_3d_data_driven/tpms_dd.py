@@ -11,18 +11,18 @@ from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import Logger
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
 # from fol.data_input_output.zarr_io import ZarrIO
-from dirichlet_control import DirichletControl3D
+from fol.controls.dirichlet_control import DirichletControl
 from fol.loss_functions.mechanical_neohooke import NeoHookeMechanicalLoss3DTetra
 import pickle
 
 # directory & save handling
-working_directory_name = 'ifol_output_meta_alpha_meta_implicit_operator_learning'
+working_directory_name = 'nn_output_tpms_data_driven'
 case_dir = os.path.join('.', working_directory_name)
 create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
 #call the function to create the mesh
-fe_mesh = Mesh("fol_io","cylindrical_fine_all_sides.med",os.path.join(os.path.abspath(__file__),'../../../meshes'))
+fe_mesh = Mesh("fol_io","cylindrical_fine.med",os.path.join(os.path.dirname(__file__),'..','..','meshes'))
 fe_mesh.Initialize()
 
 # creation of fe model and loss function
@@ -38,12 +38,12 @@ mechanical_loss_3d.Initialize()
 
 # dirichlet control
 dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}, "Uz":{"right"}}}
-dirichlet_control = DirichletControl3D(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
+dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                         fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
 dirichlet_control.Initialize()
 
 
-with open(os.path.join(os.path.dirname(__file__),'ifol_output_gt/gt_values.pkl'), 'rb') as f:
+with open(os.path.join(os.path.dirname(__file__),'nn_output_gt','gt_values.pkl'), 'rb') as f:
     gt_dict = pickle.load(f)
 gt_fe = []
 coeffs_mat = []

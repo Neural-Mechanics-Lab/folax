@@ -70,10 +70,6 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                 
             current_dofs = current_dofs.at[self.fe_loss_function.non_dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.non_dirichlet_indices])
             current_dofs = current_dofs.at[self.fe_loss_function.dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.dirichlet_indices])
-            # Piola_kirchhoff = get_stress(loss_function=self.fe_loss_function, disp_field_vec=current_dofs, K_matrix=np.ones(self.fe_loss_function.fe_mesh.GetNumberOfNodes()))
-            # write_p11.append(Piola_kirchhoff)
-            # np.savetxt(os.path.join(self.fe_solver_settings["output_directory"],"p11.txt"),np.array(write_p11))
-            # self.fe_loss_function.fe_mesh[f'FE_U_step_{load_fac}'] = current_dofs.reshape((self.fe_loss_function.fe_mesh.GetNumberOfNodes(), self.fe_loss_function.dim))
         return applied_BC_dofs
 
 

@@ -97,7 +97,7 @@ initial_solution = test_samples[initial_solution_id]
 num_time_steps = 10
 
 # predict dynamics with ifol
-phi_ifols = ifol.PredictDynamics(initial_solution,num_time_steps)
+phi_ifols = jnp.squeeze(ifol.PredictDynamics(initial_solution,num_time_steps))
 
 # predict dynamics with FE
 fe_setting = {"linear_solver_settings":{"solver":"JAX-bicgstab","tol":1e-6,"atol":1e-6,

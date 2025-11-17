@@ -1,5 +1,6 @@
 import sys
 import os
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 import pickle,optax
 import numpy as np
 from fol.tools.usefull_functions import *
@@ -114,7 +115,7 @@ initial_solution = test_temperature_fields[initial_solution_id]
 num_time_steps = 50
 
 # predict dynamics with ifol
-T_ifols = ifol.PredictDynamics(initial_solution,num_time_steps)
+T_ifols = jnp.squeeze(ifol.PredictDynamics(initial_solution,num_time_steps))
 
 # predict dynamics with FE
 fe_setting = {"linear_solver_settings":{"solver":"JAX-bicgstab","tol":1e-6,"atol":1e-6,

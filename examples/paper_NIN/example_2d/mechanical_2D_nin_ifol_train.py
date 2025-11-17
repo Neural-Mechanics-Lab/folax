@@ -180,7 +180,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
         if solve_FE:
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                         "nonlinear_solver_settings":{"rel_tol":1e-7,"abs_tol":1e-7,
-                                                        "maxiter":8,"load_incr":31}}
+                                                        "maxiter":8,"load_incr":51}}
             nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_2d,fe_setting)
             nonlin_fe_solver.Initialize()
             FE_UVW = np.array(nonlin_fe_solver.Solve(K_matrix[eval_id,:],np.zeros(2*fe_mesh.GetNumberOfNodes())))  

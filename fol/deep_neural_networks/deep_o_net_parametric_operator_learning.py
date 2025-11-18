@@ -79,3 +79,27 @@ class PhysicsInformedDeepONetParametricOperatorLearning(DeepONetParametricOperat
                              loss_name+"_max":batch_max,
                              loss_name+"_avg":batch_avg,
                              "total_loss":batch_loss})
+    
+class PhysicsInformedDeepONetParametricOperatorLearningADLoss(DeepONetParametricOperatorLearning):
+
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        coords = self.loss_function.fe_mesh.GetNodesCoordinates()
+        def dnn_dx_i(i,control_output):
+            control_output = jnp.atleast_2d(control_output)
+            return jax.jacfwd(nn_model,argnums=1)(control_output,coords[i,:].reshape(1,3)).squeeze()
+
+        # inner vmap = loop over nodes
+        inner = jax.vmap(dnn_dx_i, in_axes=(0, None))
+
+        # outer vmap = loop over batch
+        nn_derivative_batch = jax.vmap(inner, in_axes=(None, 0), out_axes=0)(
+                        jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()), control_outputs) # shape: (batch_size, num_nodes, derivative_dim=3)
+
+        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(nn_derivative_batch,control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})

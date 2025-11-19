@@ -209,3 +209,78 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
         nnx.update(self.latent_step_nnx_model, restored_state)
 
         fol_info(f"meta flax nnx state is restored from {restore_state_directory}")
+
+class MetaAlphaMetaImplicitParametricOperatorLearningADLoss(MetaAlphaMetaImplicitParametricOperatorLearning):
+    # def __init__(self,
+    #              name:str,
+    #              control:Control,
+    #              loss_function:Loss,
+    #              flax_neural_network:HyperNetwork,
+    #              main_loop_optax_optimizer:GradientTransformation,
+    #              latent_step_optax_optimizer:GradientTransformation,
+    #              latent_step_size:float=1e-2,
+    #              num_latent_iterations:int=3
+    #              ):
+
+    #     super().__init__(name,control,loss_function,flax_neural_network,
+    #                      main_loop_optax_optimizer,latent_step_optax_optimizer,latent_step_size,num_latent_iterations)
+        
+
+    def ComputeSingleModelSpatialGradient(self,nn_model:nnx.Module,nodes:jnp.array,latent_code:jnp.array):
+        coords = self.loss_function.fe_mesh.GetNodesCoordinates()
+        def dnn_dx_i(i,latent_code):
+            return jax.jacfwd(nn_model,argnums=1)(latent_code[None,:],coords[i,:].reshape(1,3)).squeeze()
+        # loop over nodes
+        return jax.vmap(dnn_dx_i, in_axes=(0, None))(nodes,latent_code)
+        
+    def ComputeBatchModelSpatialGradient(self,nn_model:nnx.Module,nodes:jnp.array,batch_latent_codes:jnp.array):   
+        return jax.vmap(self.ComputeSingleModelSpatialGradient, in_axes=(None,None,0))(
+                        nn_model,nodes,batch_latent_codes) # shape: (batch_size, num_nodes, derivative_dim=3)
+
+    
+    def ComputeBatchPredictions(self,batch_X:jnp.ndarray,meta_model:Tuple[nnx.Module,nnx.Module]):
+
+        nn_model,latent_step = meta_model
+
+        latent_codes = jnp.zeros((batch_X.shape[0],nn_model.in_features))
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
+
+        def latent_loss(latent_code,control_output,nn_model):
+            nn_output = nn_model(latent_code[None, :],self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()
+            nn_derivative_batch = self.ComputeBatchModelSpatialGradient(nn_model,jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()),latent_code[None,:])
+            return self.loss_function.ComputeBatchLoss(nn_derivative_batch,control_output,nn_output)[0]
+
+        vec_grad_func = jax.vmap(jax.grad(latent_loss, argnums=0))
+        for _ in range(self.num_latent_iterations):
+            grads = vec_grad_func(latent_codes,control_outputs,nn_model)
+            latent_codes -= latent_step() * grads
+
+        return nn_model(latent_codes,self.loss_function.fe_mesh.GetNodesCoordinates())
+    
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        batch_predictions = self.ComputeBatchPredictions(batch[0],nn_model)
+
+        nn_model, latent_step = nn_model
+        latent_codes = jnp.zeros((batch[0].shape[0],nn_model.in_features))
+
+
+        def latent_loss(latent_code,control_output,nn_model):
+            nn_output = nn_model(latent_code[None, :],self.loss_function.fe_mesh.GetNodesCoordinates()).flatten()
+            nn_derivative_batch = self.ComputeBatchModelSpatialGradient(nn_model,jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()),latent_code[None,:])
+            return self.loss_function.ComputeBatchLoss(nn_derivative_batch,control_output,nn_output)[0]
+
+        vec_grad_func = jax.vmap(jax.grad(latent_loss, argnums=0))
+        for _ in range(self.num_latent_iterations):
+            grads = vec_grad_func(latent_codes,control_outputs,nn_model)
+            latent_codes -= latent_step() * grads
+
+        latent_codes = latent_codes
+        nn_derivative_batch = self.ComputeBatchModelSpatialGradient(nn_model,jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()),latent_codes)
+
+        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(nn_derivative_batch,control_outputs,batch_predictions)
+        loss_name = self.loss_function.GetName()
+        return batch_loss, ({loss_name+"_min":batch_min,
+                             loss_name+"_max":batch_max,
+                             loss_name+"_avg":batch_avg,
+                             "total_loss":batch_loss})

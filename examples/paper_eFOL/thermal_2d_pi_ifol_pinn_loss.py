@@ -4,13 +4,12 @@ import numpy as np
 import optax
 from flax import nnx
 import jax
-jax.config.update('jax_platform_name', 'cpu')
 from fol.mesh_input_output.mesh import Mesh
 from fol.loss_functions.thermal import ThermalLoss2DQuad
 from fol.loss_functions.pinn_loss import PinnThermalLoss
 from fol.solvers.fe_nonlinear_residual_based_solver import FiniteElementNonLinearResidualBasedSolver
 from fol.controls.fourier_control import FourierControl
-from fol.deep_neural_networks.meta_implicit_parametric_operator_learning import MetaImplicitParametricOperatorLearning
+from fol.deep_neural_networks.meta_alpha_meta_implicit_parametric_operator_learning import MetaAlphaMetaImplicitParametricOperatorLearningADLoss
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
 from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import *
@@ -26,7 +25,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
 
     # create mesh_io
     # problem setup
-    model_settings = {"L":1,"N":12,
+    model_settings = {"L":1,"N":42,
                     "left":1.0,"right":0.1}
 
     # creation of the model
@@ -35,11 +34,11 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # create fe-based loss function
     bc_dict = {"T":{"left":model_settings["left"],"right":model_settings["right"]}}
 
-    thermal_loss_2d = ThermalLoss2DQuad("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":2,
+    thermal_loss_2d = ThermalLoss2DQuad("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":1,
                                                                           "beta":2,"c":4},
                                                                             fe_mesh=fe_mesh)
     
-    thermal_loss_2d_pinn = PinnThermalLoss("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":2,
+    thermal_loss_2d_pinn = PinnThermalLoss("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":1,
                                                                         "beta":2,"c":4},
                                                                         fe_mesh=fe_mesh)
 
@@ -88,14 +87,14 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         "characteristic_length": 32,
         "synthesizer_depth": 4,
         "activation_settings":{"type":"sin",
-                                "prediction_gain":5,
+                                "prediction_gain":20,
                                 "initialization_gain":1.0},
         "skip_connections_settings": {"active":False,"frequency":1},
         "latent_size":  4*64,
         "modulator_bias": False,
-        "main_loop_transform": 1e-4,
-        "latent_step_optimizer": 1e-4,
-        "ifol_nn_latent_step_size": 1e-2
+        "main_loop_transform": 1e-5,    # optax.linear_schedule(init_value=1e-4, end_value=1e-6, transition_steps=ifol_num_epochs),
+        "latent_step_optimizer": 1e-5,   # optax.linear_schedule(init_value=1e-4, end_value=1e-6, transition_steps=ifol_num_epochs),
+        "ifol_nn_latent_step_size": 1e-4,
     }
 
     # design synthesizer & modulator NN for hypernetwork
@@ -122,12 +121,12 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     latent_step_optimizer = optax.chain(optax.adam(ifol_settings_dict["latent_step_optimizer"]))
 
     # create fol
-    ifol = MetaImplicitParametricOperatorLearning(name="meta_implicit_fol",control=fourier_control,
+    ifol = MetaAlphaMetaImplicitParametricOperatorLearningADLoss(name="meta_implicit_fol",control=fourier_control,
                                                                     loss_function=thermal_loss_2d_pinn,
                                                                     flax_neural_network=hyper_network,
                                                                     main_loop_optax_optimizer=main_loop_transform,
+                                                                    latent_step_optax_optimizer = latent_step_optimizer,
                                                                     latent_step_size=ifol_settings_dict["ifol_nn_latent_step_size"],
-                                                                    latent_step_optimizer = ifol_settings_dict["latent_step_optimizer"],
                                                                     num_latent_iterations=3)
     ifol.Initialize()
 
@@ -135,7 +134,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     train_set_otf = coeffs_matrix[otf_id,:].reshape(-1,1).T     # for On The Fly training
 
     train_start_id = 0
-    train_end_id = 2
+    train_end_id = 3
     train_set_pr = coeffs_matrix[train_start_id:train_end_id,:]     # for parametric training
 
     test_start_id = 8000
@@ -153,7 +152,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         test_set = train_set
         tests = [otf_id]
     #here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
-    train_settings_dict = {"batch_size": 2,
+    train_settings_dict = {"batch_size": 3,
                             "num_epoch":ifol_num_epochs,
                             "parametric_learning": parametric_learning,
                             "OTF_id": otf_id,
@@ -168,7 +167,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                 batch_size=train_settings_dict["batch_size"],
                 convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
                 plot_settings={"plot_save_rate":100},
-                train_checkpoint_settings={"least_loss_checkpointing":False,"frequency":10},
+                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
                 working_directory=case_dir)
 
     # load teh best model

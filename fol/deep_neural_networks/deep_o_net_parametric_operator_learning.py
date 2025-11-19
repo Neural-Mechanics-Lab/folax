@@ -82,20 +82,20 @@ class PhysicsInformedDeepONetParametricOperatorLearning(DeepONetParametricOperat
     
 class PhysicsInformedDeepONetParametricOperatorLearningADLoss(DeepONetParametricOperatorLearning):
 
-    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
-        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+    def ComputeSingleModelSpatialGradient(self,nn_model:nnx.Module,nodes:jnp.array,control_output:jnp.array):
         coords = self.loss_function.fe_mesh.GetNodesCoordinates()
         def dnn_dx_i(i,control_output):
-            control_output = jnp.atleast_2d(control_output)
-            return jax.jacfwd(nn_model,argnums=1)(control_output,coords[i,:].reshape(1,3)).squeeze()
-
-        # inner vmap = loop over nodes
-        inner = jax.vmap(dnn_dx_i, in_axes=(0, None))
-
-        # outer vmap = loop over batch
-        nn_derivative_batch = jax.vmap(inner, in_axes=(None, 0), out_axes=0)(
-                        jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()), control_outputs) # shape: (batch_size, num_nodes, derivative_dim=3)
-
+            return jax.jacfwd(nn_model,argnums=1)(control_output[None,:],coords[i,:].reshape(1,3)).squeeze()
+        # loop over nodes
+        return jax.vmap(dnn_dx_i, in_axes=(0, None))(nodes,control_output)
+        
+    def ComputeBatchModelSpatialGradient(self,nn_model:nnx.Module,nodes:jnp.array,control_outputs:jnp.array):    
+        return jax.vmap(self.ComputeSingleModelSpatialGradient, in_axes=(None,None,0))(
+                        nn_model,nodes,control_outputs) # shape: (batch_size, num_nodes, derivative_dim=3)
+    
+    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
+        nn_derivative_batch = self.ComputeBatchModelSpatialGradient(nn_model,jnp.arange(self.loss_function.fe_mesh.GetNumberOfNodes()),control_outputs)
         batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
         batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(nn_derivative_batch,control_outputs,batch_predictions)
         loss_name = self.loss_function.GetName()

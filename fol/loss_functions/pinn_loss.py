@@ -111,8 +111,6 @@ class PinnThermalLoss(Loss):
         self.initialized = True
 
     def GetFullNeuman(self,gradient_values):
-        # solution_vector = jnp.zeros((self.fe_mesh.GetNumberOfNodes(),3))
-        # solution_vector = solution_vector.at[:].set(gradient_values)
         gradient_values = gradient_values.at[:,self.neuman_indices,1].set(0.)
         return gradient_values
     
@@ -138,14 +136,14 @@ class PinnThermalLoss(Loss):
                              area:jnp.array) -> float:
         grad_T = nn_derivative_i.flatten()
         te_sg =  jax.lax.stop_gradient(te)
-        return te_sg * 0.5*de* (grad_T @ grad_T)*area
+        return 0.5*de* (grad_T @ grad_T)*area
     
     def ComputeNodalEnergyVmapCompatible(self,
                                            node_id:jnp.integer,
                                            nn_derivative_batch:jnp.array,
                                            full_control_vector:jnp.array,
                                            full_dof_vector:jnp.array):
-        return self.ComputeNodalEnergy(nn_derivative_batch[node_id],
+        return self.ComputeNodalEnergy(nn_derivative_batch[node_id,:],
                                          full_control_vector[node_id],
                                          full_dof_vector[node_id].reshape(-1,1),
                                          area=self.area[node_id])
@@ -168,23 +166,21 @@ class PinnThermalLoss(Loss):
         batch_params = batch_params.reshape(batch_params.shape[0], -1)
         batch_dofs = jnp.atleast_2d(batch_dofs)
         batch_dofs = batch_dofs.reshape(batch_dofs.shape[0], -1)
-        BC_applied_batch_dofs = self.GetFullDofVector(batch_params,batch_dofs)
-        NBC_applied_batch_dofs = self.GetFullNeuman(nn_derivative_batch)
+        # BC_applied_batch_dofs = self.GetFullDofVector(batch_params,batch_dofs)
+        # NBC_applied_batch_dofs = self.GetFullNeuman(nn_derivative_batch)
 
-        def ComputeSingleLoss(params,dofs,nn_derivative_batch):
-            return jnp.sum(self.ComputeNodessEnergies(nn_derivative_batch,params,dofs))**self.loss_function_exponent
+        def ComputeSingleNodalLoss(params,dofs,nn_derivative):
+            return jnp.sum(self.ComputeNodessEnergies(nn_derivative,params,dofs))**self.loss_function_exponent
 
-        batch_energies = jax.vmap(ComputeSingleLoss)(batch_params,BC_applied_batch_dofs,NBC_applied_batch_dofs)
-
-        def ComputeSingleBCLoss(dofs,nn_derivative):
-            dirichlet_err = abs(dofs[self.dirichlet_indices] - self.dirichlet_values)
+        def ComputeSingleBCLoss(dofs,nn_derivative,dirichlet_values):
+            dirichlet_err = abs(dofs[self.dirichlet_indices] - dirichlet_values)
             neumann_err = abs(nn_derivative[:,1] - 0)
-            return jnp.mean(dirichlet_err**self.loss_function_exponent) + jnp.mean(neumann_err**self.loss_function_exponent)
+            return jnp.mean(dirichlet_err) ,jnp.mean(neumann_err)
         
-        batch_bc_loss = jax.vmap(ComputeSingleBCLoss, in_axes=(0,0))(batch_dofs,nn_derivative_batch)
+        batch_energies = jax.vmap(ComputeSingleNodalLoss)(batch_params,batch_dofs,nn_derivative_batch)
+        batch_dirichlet_loss, batch_neumann_loss = jax.vmap(ComputeSingleBCLoss, in_axes=(0,0,None), out_axes=(0,0))(batch_dofs,nn_derivative_batch,self.dirichlet_values)
 
-        total_loss = jnp.mean(batch_energies) + jnp.mean(batch_bc_loss)
+        lambda_energy, lambda_dirichlet, lambda_neumann = 1., 1., 1.
+        total_loss = lambda_energy*batch_energies + lambda_dirichlet*batch_dirichlet_loss + lambda_neumann*batch_neumann_loss
 
-        return total_loss,(jnp.min(total_loss),jnp.max(total_loss),jnp.mean(total_loss))
-
-   
+        return jnp.mean(total_loss),(jnp.min(total_loss),jnp.max(total_loss),jnp.mean(total_loss))

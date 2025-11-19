@@ -38,11 +38,11 @@ fe_mesh = create_2D_square_mesh(L=model_settings["L"],N=model_settings["N"])
 # create fe-based loss function
 bc_dict = {"T":{"left":model_settings["left"],"right":model_settings["right"]}}
 
-thermal_loss_2d_pinn = PinnThermalLoss("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":2,
+thermal_loss_2d_pinn = PinnThermalLoss("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":1,
                                                                         "beta":2,"c":4},
                                                                         fe_mesh=fe_mesh)
 
-thermal_loss_2d = ThermalLoss2DQuad("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":2,
+thermal_loss_2d = ThermalLoss2DQuad("thermal_loss_2d",loss_settings={"dirichlet_bc_dict":bc_dict,"loss_function_exponent":1,
                                                                         "beta":2,"c":4},
                                                                         fe_mesh=fe_mesh)
 
@@ -111,7 +111,7 @@ deep_onet = DeepONet("main_deeponet",
 
 num_epochs = 2000
 learning_rate_scheduler = optax.linear_schedule(init_value=1e-4, end_value=1e-6, transition_steps=num_epochs)
-optimizer = optax.chain(optax.adam(1e-4))
+optimizer = optax.chain(optax.adam(learning_rate_scheduler))
 
 # create fol
 deeponet_learning = PhysicsInformedDeepONetParametricOperatorLearningADLoss(name="deeponet_learning",
@@ -123,7 +123,7 @@ deeponet_learning = PhysicsInformedDeepONetParametricOperatorLearningADLoss(name
 deeponet_learning.Initialize()
 
 train_start_id = 0
-train_end_id = 2
+train_end_id = 9
 test_start_id = 8000
 test_end_id = 8001
 
@@ -131,14 +131,14 @@ test_end_id = 8001
 deeponet_learning.Train(train_set=(coeffs_matrix[train_start_id:train_end_id,:],),
                         test_set=(coeffs_matrix[test_start_id:test_end_id,:],),
                         test_frequency=100,
-                        batch_size=2,
+                        batch_size=3,
                         convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
                         plot_settings={"plot_save_rate":100},
-                        train_checkpoint_settings={"least_loss_checkpointing":False,"frequency":100},
+                        train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":100},
                         working_directory=case_dir)
 
 # load teh best model
-deeponet_learning.RestoreState(restore_state_directory=case_dir+"/flax_final_state")
+deeponet_learning.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
 fe_setting = {"linear_solver_settings":{"solver":"JAX-direct","tol":1e-10,"atol":1e-10,
                                                 "maxiter":10000,"pre-conditioner":"ilu"},

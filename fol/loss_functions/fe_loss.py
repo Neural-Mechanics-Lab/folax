@@ -35,9 +35,7 @@ class FiniteElementLoss(Loss):
         number_dofs_per_node = len(dofs_list)
         dirichlet_indices = []
         dirichlet_values = []     
-        dirichlet_indices_dict = {}
         for dof_index,dof in enumerate(dofs_list):
-            dirichlet_indices_dict[dof]={}
             for boundary_name,boundary_value in dirichlet_bc_dict[dof].items():
                 boundary_node_ids = jnp.array(self.fe_mesh.GetNodeSet(boundary_name))
                 dirichlet_bc_indices = number_dofs_per_node*boundary_node_ids + dof_index
@@ -45,7 +43,6 @@ class FiniteElementLoss(Loss):
 
                 dirichlet_bc_values = boundary_value * jnp.ones_like(dirichlet_bc_indices)
                 dirichlet_values.append(dirichlet_bc_values)
-                dirichlet_indices_dict[dof][boundary_name]=dirichlet_bc_indices
         
         if len(dirichlet_indices) != 0:
             self.dirichlet_indices = jnp.concatenate(dirichlet_indices)
@@ -56,7 +53,6 @@ class FiniteElementLoss(Loss):
 
         all_indices = jnp.arange(number_dofs_per_node*self.fe_mesh.GetNumberOfNodes())
         self.non_dirichlet_indices = jnp.setdiff1d(all_indices, self.dirichlet_indices)
-        self.dirichlet_indices_dict = dirichlet_indices_dict
 
     def Initialize(self,reinitialize=False) -> None:
 
@@ -100,7 +96,6 @@ class FiniteElementLoss(Loss):
 
         if self.loss_settings.get("parametric_boundary_learning"):
             self.full_dof_vector_function = ConstructFullDofVectorParametricLearning
-            self.K_matrix = self.loss_settings.get("K_matrix", jnp.ones(self.fe_mesh.GetNumberOfNodes()))
         else:
             self.full_dof_vector_function = ConstructFullDofVector
 

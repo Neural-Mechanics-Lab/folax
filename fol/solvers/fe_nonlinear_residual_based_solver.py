@@ -33,10 +33,8 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                                                                 self.fe_solver_settings["nonlinear_solver_settings"])
     @print_with_timestamp_and_execution_time
     def Solve(self,current_control_vars,current_dofs_np:np.array):
-        current_dofs = jnp.array(current_dofs_np)
+        current_dofs = jnp.asarray(current_dofs_np)
         load_increament = self.nonlinear_solver_settings["load_incr"]
-        write_resnorm = []
-        write_p11 = []
         for load_fac in range(load_increament):
             fol_info(f"loadStep; increment:{load_fac+1}")
             applied_BC_dofs = self.fe_loss_function.ApplyDirichletBCOnDofVector(current_dofs,(load_fac+1)/load_increament)
@@ -47,19 +45,15 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                 if jnp.isnan(res_norm):
                     fol_info("Residual norm is NaN, check inputs!")
                     raise(ValueError("res_norm contains nan values!"))
+                if res_norm<self.nonlinear_solver_settings["abs_tol"]:
+                    fol_info(f"converged; iterations:{i+1},residuals_norm:{res_norm}")
+                    break
                     
                 delta_dofs = self.LinearSolve(BC_applied_jac,BC_applied_r,applied_BC_dofs)
                 delta_norm = jnp.linalg.norm(delta_dofs,ord=2)
                 applied_BC_dofs = applied_BC_dofs.at[:].add(delta_dofs)
 
-                if self.fe_solver_settings.get('output_directory') is not None:
-                    write_resnorm.append(res_norm)
-                    np.savetxt(os.path.join(self.fe_solver_settings['output_directory'],'res_norm_jax.txt'),np.array(write_resnorm))
-                
-                if delta_norm<self.nonlinear_solver_settings["rel_tol"] or delta_norm<self.nonlinear_solver_settings["abs_tol"]:
-                    fol_info(f"converged; iterations:{i+1},delta_norm:{delta_norm},residuals_norm:{res_norm}")
-                    break
-                if res_norm<self.nonlinear_solver_settings["rel_tol"] or res_norm<self.nonlinear_solver_settings["abs_tol"]:
+                if delta_norm<self.nonlinear_solver_settings["rel_tol"]:
                     fol_info(f"converged; iterations:{i+1},delta_norm:{delta_norm},residuals_norm:{res_norm}")
                     break
                 elif i+1==self.nonlinear_solver_settings["maxiter"]:
@@ -67,11 +61,9 @@ class FiniteElementNonLinearResidualBasedSolver(FiniteElementLinearResidualBased
                     break
                 else:
                     fol_info(f"iteration:{i+1},delta_norm:{delta_norm},residuals_norm:{res_norm}")
-                
             current_dofs = current_dofs.at[self.fe_loss_function.non_dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.non_dirichlet_indices])
             current_dofs = current_dofs.at[self.fe_loss_function.dirichlet_indices].set(applied_BC_dofs[self.fe_loss_function.dirichlet_indices])
         return applied_BC_dofs
-
 
 
 

@@ -12,8 +12,18 @@ from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
 from fol.mesh_input_output.mesh import Mesh
+from fol.tools.usefull_functions import *
 
 class SaintVenantMechanicalLoss(FiniteElementLoss):
+
+    default_material_settings = {"young_modulus":1.0,
+                                 "poisson_ratio":"0.3",
+                                 "heterogeneity_field_name":"K",
+                                 "heterogeneity_default_value":1.0}
+    
+    def __init__(self, name: str, loss_settings: dict, fe_mesh: Mesh):
+        loss_settings["material_dict"] = UpdateDefaultDict(self.default_material_settings,loss_settings["material_dict"])
+        super().__init__(name,loss_settings,fe_mesh)
 
     def Initialize(self) -> None:  
         super().Initialize() 
@@ -43,7 +53,16 @@ class SaintVenantMechanicalLoss(FiniteElementLoss):
                  self.CalculateGeometricStiffness = self.CalculateHexaGeometricStiffness3D
             self.body_force = jnp.zeros((3,1))
         if "body_foce" in self.loss_settings:
-                self.body_force = jnp.array(self.loss_settings["body_foce"])     
+                self.body_force = jnp.array(self.loss_settings["body_foce"])   
+
+        if self.loss_settings.get("parametric_boundary_learning"):  
+            heterogeneity_field = self.loss_settings["material_dict"]["heterogeneity_field_name"]
+            heterogeneity_default_value = self.loss_settings["material_dict"]["heterogeneity_default_value"]
+            if not self.fe_mesh.HasPointData(heterogeneity_field):
+                self.fe_mesh[heterogeneity_field] = heterogeneity_default_value * np.ones(self.fe_mesh.GetNumberOfNodes())
+
+            self.heterogeneity_field = jnp.asarray(self.fe_mesh[heterogeneity_field])
+            self.get_param_function = lambda x: self.heterogeneity_field
 
     @partial(jit, static_argnums=(0,))
     def CalculateKinematics2D(self,DN_DX_T:jnp.array,uve:jnp.array) -> jnp.array:

@@ -13,17 +13,15 @@ from fol.deep_neural_networks.nns import HyperNetwork,MLP
 from fol.data_input_output.zarr_io import ZarrIO
 import pickle,optax
 
-# exit()
-
-# directory & save handling
+# --- Directory setup and logging ---
 working_directory_name = 'meta_alpha_meta_implicit_decoder_conductivity_fields'
 case_dir = os.path.join('.', working_directory_name)
-# create_clean_directory(working_directory_name)
+create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
-mesh_size = 21
+mesh_size = 21 # mesh resolution
 
-# problem setup
+# --- Problem setup ---
 model_settings = {"L":1,"N":int((mesh_size))}
 fe_mesh = create_2D_square_mesh(L=model_settings["L"],N=model_settings["N"])
 
@@ -44,26 +42,12 @@ identity_control.Initialize()
 fourier_control.Initialize()
 
 
-# create/load some random coefficients & K for training
-create_random_coefficients = False
-if create_random_coefficients:
-    number_of_samples = 10000
-    coeffs_matrix,K_matrix = create_random_fourier_samples(fourier_control,number_of_samples)
-    export_dict = {}
-    export_dict["coeffs_matrix"] = coeffs_matrix
-    export_dict["x_freqs"] = fourier_control.x_freqs
-    export_dict["y_freqs"] = fourier_control.y_freqs
-    export_dict["z_freqs"] = fourier_control.z_freqs
-    with open(f'fourier_3D_control_dict_10K.pkl', 'wb') as f:
-        pickle.dump(export_dict,f)
-else:
-    with open(f'fourier_3D_control_dict_10K.pkl', 'rb') as f:
-        loaded_dict = pickle.load(f)
-    
-    coeffs_matrix = loaded_dict["coeffs_matrix"]
+# load some random coefficients & K for training
+with open(f'fourier_3D_control_dict_10K.pkl', 'rb') as f:
+    loaded_dict = pickle.load(f)
 
+coeffs_matrix = loaded_dict["coeffs_matrix"]
 K_matrix = fourier_control.ComputeBatchControlledVariables(coeffs_matrix)
-
 
 # design siren NN for learning
 characteristic_length = 64

@@ -13,7 +13,7 @@ from fol.data_input_output.zarr_io import ZarrIO
 # directory & save handling
 working_directory_name = 'meta_implicit_decoder_solution_fields'
 case_dir = os.path.join('.', working_directory_name)
-# create_clean_directory(working_directory_name)
+create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
 # import data sets if availbale otherwise run the generator and then import
@@ -83,12 +83,12 @@ train_end_id = 20
 test_start_id = 3 * train_end_id
 test_end_id = 4 * train_end_id
 
-# fol.Train(train_set=(data_sets["T_FEM"][train_start_id:train_end_id,:],),
-#           test_set=(data_sets["T_FEM"][test_start_id:test_end_id,:],),
-#           test_frequency=10,batch_size=1,
-#           convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
-#           train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-#           working_directory=case_dir)
+fol.Train(train_set=(data_sets["T_FEM"][train_start_id:train_end_id,:],),
+          test_set=(data_sets["T_FEM"][test_start_id:test_end_id,:],),
+          test_frequency=10,batch_size=1,
+          convergence_settings={"num_epochs":num_epochs,"relative_error":1e-100,"absolute_error":1e-100},
+          train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+          working_directory=case_dir)
 
 # load the best model
 fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")

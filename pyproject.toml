@@ -20,7 +20,7 @@ dependencies = [
     'numpy',
     'scipy',
     'h5py',
-    'zarr',
+    'zarr<3',
     'dask',         
     'pyvista'       
 ]

@@ -3,6 +3,7 @@ import os
 
 # Define the scripts and their arguments
 scripts_and_args = [
+    ("fourier_feature_mapping_hypernetworks","implicit_learning_mechanical_2D.py", "clean_dir=true"),
     ("sensitivity_analysis","square_mechanical_adj_sa.py", "clean_dir=true"),
     ("implicit_control_solution_decoder_data_driven","meta_implicit_decoder_fourier_fields.py", "clean_dir=true","ifol_num_epochs=10"),
     ("implicit_parametric_learning_square","meta_implicit_pr_lr_mechanical_2D.py", "clean_dir=true","ifol_num_epochs=10"),

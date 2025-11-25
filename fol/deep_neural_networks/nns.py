@@ -88,8 +88,13 @@ def siren_init(key:Array,in_dim:int,out_dim:int,activation_settings:dict):
 
 class MLP(nnx.Module):
     """
-    A multi-layer perceptron (MLP) with customizable activation functions, skip connections, 
-    and initialization strategies.
+    A flexible multi-layer perceptron (MLP) supporting customizable activation functions, 
+    skip connections, Fourier feature mappings, and initialization strategies.
+
+    This module allows you to configure both the architectural and functional aspects of the 
+    neural network, including input/output dimensions, hidden layer sizes, activation function 
+    properties, and frequency-based feature embeddings (Fourier features) to improve the 
+    network's ability to represent high-frequency variations.
 
     Args:
         name (str): Name of the MLP instance.
@@ -104,6 +109,12 @@ class MLP(nnx.Module):
         skip_connections_settings (dict, optional): Configuration for skip connections. Defaults to:
             - "active": Whether to enable skip connections.
             - "frequency": Frequency of skip connections (in layers).
+        fourier_feature_settings (dict, optional): Configuration for Fourier feature mapping. Defaults to:
+            - "active": Whether to enable Fourier feature transformation. Defaults to `False`.
+            - "type": Type of Fourier mapping (currently only `"Gaussian"` is implemented).
+            - "size": Number of Fourier feature dimensions (default equals `input_size`).
+            - "frequency_scale": Scaling factor for frequency sampling. Defaults to `1.0`.
+            - "learn_frequency": Whether to learn Fourier frequencies during training. Defaults to `False`.
 
     Attributes:
         name (str): Name of the MLP instance.
@@ -113,12 +124,22 @@ class MLP(nnx.Module):
         activation_settings (dict): Activation function settings.
         use_bias (bool): Whether biases are used in the layers.
         skip_connections_settings (dict): Skip connection configuration.
+        fourier_feature_settings (dict): Fourier feature mapping configuration.
         nn_params (list): List of network parameters (weights and biases).
         act_func (Callable): Activation function used in the MLP.
         act_func_gain (float): Gain applied to activation function outputs.
         fw_func (Callable): Forward pass function (with or without skip connections).
         total_num_weights (int): Total number of weights in the network.
         total_num_biases (int): Total number of biases in the network.
+
+    Notes:
+        - When `fourier_feature_settings["active"]` is `True`, the input is first transformed 
+          via a Fourier mapping before being passed to the MLP. This enhances the model’s ability 
+          to capture high-frequency signals, often used in implicit neural representations (INRs) 
+          and coordinate-based networks.
+        - Skip connections and Fourier features can be used together for better gradient flow 
+          and representational capacity.
+
     """
     @print_with_timestamp_and_execution_time
     def __init__(self,name:str,  
@@ -127,7 +148,8 @@ class MLP(nnx.Module):
                       hidden_layers:list=[],
                       activation_settings:dict={},
                       use_bias:bool=True,
-                      skip_connections_settings:dict={}):
+                      skip_connections_settings:dict={},
+                      fourier_feature_settings:dict={}):
         """
         Initializes the MLP with specified parameters and configurations.
 
@@ -135,10 +157,21 @@ class MLP(nnx.Module):
             name (str): Name of the MLP instance.
             input_size (int): Number of input features.
             output_size (int): Number of output features.
-            hidden_layers (list): List specifying hidden layer sizes.
-            activation_settings (dict): Configuration for activation functions.
-            use_bias (bool): Whether to include biases in the layers.
-            skip_connections_settings (dict): Configuration for skip connections.
+            hidden_layers (list): List of integers specifying the number of units in each hidden layer.
+            activation_settings (dict, optional): Configuration for activation functions. Defaults to:
+                - "type": Type of activation (e.g., `"sin"`, `"relu"`, etc.).
+                - "prediction_gain": Scaling factor for activations (default `30` for `"sin"`).
+                - "initialization_gain": Gain used during weight initialization (default `1`).
+            use_bias (bool, optional): Whether to include biases in the layers. Defaults to `True`.
+            skip_connections_settings (dict, optional): Configuration for skip connections. Defaults to:
+                - "active": Whether to enable skip connections. Defaults to `False`.
+                - "frequency": Frequency of skip connections (applied every N layers). Defaults to `1`.
+            fourier_feature_settings (dict, optional): Configuration for Fourier feature mapping. Defaults to:
+                - "active": Whether to enable Fourier feature transformation. Defaults to `False`.
+                - "type": Type of Fourier mapping (currently only `"Gaussian"` is implemented).
+                - "size": Number of Fourier feature dimensions (default equals `input_size`).
+                - "frequency_scale": Scaling factor for frequency sampling. Defaults to `1.0`.
+                - "learn_frequency": Whether to learn Fourier frequencies during training. Defaults to `False`.
         """
         self.name = name
         self.in_features=input_size
@@ -147,6 +180,7 @@ class MLP(nnx.Module):
         self.activation_settings = activation_settings
         self.use_bias = use_bias
         self.skip_connections_settings = skip_connections_settings
+        self.fourier_feature_settings = fourier_feature_settings
 
         default_activation_settings={"type":"sin",
                                     "prediction_gain":30,
@@ -157,9 +191,21 @@ class MLP(nnx.Module):
         default_skip_connections_settings = {"active":False,"frequency":1}
         self.skip_connections_settings = UpdateDefaultDict(default_skip_connections_settings,
                                                             self.skip_connections_settings) 
+        
+        default_fourier_feature_settings = {"active":False,
+                                            "type":"Gaussian",
+                                            "size":int(self.in_features),
+                                            "frequency_scale":1.0,
+                                            "learn_frequency":False}
+        self.fourier_feature_settings = UpdateDefaultDict(default_fourier_feature_settings,
+                                                            self.fourier_feature_settings)         
 
         self.InitialNetworkParameters()
-        fol_info(f"MLP network is initialized by {self.total_num_weights} weights and {self.total_num_biases} biases !")
+
+        if self.fourier_feature_settings["active"] and self.fourier_feature_settings["learn_frequency"]:
+            fol_info(f"MLP network is initialized by {self.total_num_weights} weights and {self.total_num_biases} biases, {self.B.size} learnable fourier feature frequencies !")
+        else:
+            fol_info(f"MLP network is initialized by {self.total_num_weights} weights and {self.total_num_biases} biases !")
 
         act_name = self.activation_settings["type"]
         self.act_func = globals()[act_name]
@@ -178,7 +224,8 @@ class MLP(nnx.Module):
         Initializes the weights and biases of the MLP based on layer sizes and 
         activation settings, with support for skip connections.
         """
-        layer_sizes = [self.in_features] +  self.hidden_layers
+        layer_sizes = [2*self.fourier_feature_settings["size"] if self.fourier_feature_settings["active"] else self.in_features] + self.hidden_layers
+
         if self.out_features != 0:
             layer_sizes += [self.out_features]
 
@@ -206,6 +253,18 @@ class MLP(nnx.Module):
             else:
                 self.nn_params.append((nnx.Param(init_weights),nnx.Variable(jnp.zeros_like(init_biases))))
 
+        # # now compute B matrix for fourier_feature_mapping
+        if self.fourier_feature_settings["active"]:
+            rand_key = random.PRNGKey(43)
+            B_initial_values = float(self.fourier_feature_settings["frequency_scale"]) * random.normal(rand_key, (self.fourier_feature_settings["size"], self.in_features))
+            if self.fourier_feature_settings["learn_frequency"]:
+                self.B = nnx.Param(B_initial_values)
+            else:
+                self.B = nnx.Variable(B_initial_values)
+            self.input_mapping = lambda x: jnp.concatenate([jnp.sin((2.*np.pi*x) @ self.B.T), jnp.cos((2.*np.pi*x) @ self.B.T)],axis=-1)
+        else:
+            self.input_mapping = lambda x: x
+
     def GetName(self):
         """
         Retrieves the name of the MLP instance.
@@ -214,6 +273,20 @@ class MLP(nnx.Module):
             str: Name of the MLP instance.
         """
         return self.name
+    
+    def CountTrainableParams(self):
+        """
+        Compute the total number of trainable parameters in this NNX module.
+
+        This method collects all parameters marked as `nnx.Param` within the module's
+        state and sums their element counts to produce the total number of
+        trainable parameters.
+
+        Returns:
+            int: Total count of trainable parameters.
+        """
+        params = nnx.state(self, nnx.Param)
+        return  sum(np.prod(x.shape) for x in jax.tree_util.tree_leaves(params))  
 
     def ComputeX(self,w:nnx.Param,prev_x:jax.Array,b:nnx.Param):
         """
@@ -299,7 +372,7 @@ class MLP(nnx.Module):
         Returns:
             jax.Array: Output of the network.
         """
-        return self.fw_func(x,self.nn_params)
+        return self.fw_func(self.input_mapping(x),self.nn_params)
 
 class HyperNetwork(nnx.Module):
     """
@@ -388,7 +461,7 @@ class HyperNetwork(nnx.Module):
         elif self.coupling_settings["modulator_to_synthesizer_coupling_mode"] == "one_modulator_per_synthesizer_layer":
             self.total_num_biases = self.synthesizer_nn.total_num_biases
             self.total_num_weights = self.synthesizer_nn.total_num_weights
-            self.modulator_nns = []
+            self.modulator_nns = nnx.List([])
             for i in range(len(self.synthesizer_nn.hidden_layers)):
                 synthesizer_layer_biases = self.synthesizer_nn.hidden_layers[i]
                 synthesizer_layer_modulator = MLP(name=f"synthesizer_layer_{i}_modulator",
@@ -397,7 +470,8 @@ class HyperNetwork(nnx.Module):
                                                   hidden_layers=self.modulator_nn.hidden_layers,
                                                   activation_settings=self.modulator_nn.activation_settings,
                                                   use_bias=self.modulator_nn.use_bias,
-                                                  skip_connections_settings=self.modulator_nn.skip_connections_settings)
+                                                  skip_connections_settings=self.modulator_nn.skip_connections_settings,
+                                                  fourier_feature_settings=self.modulator_nn.fourier_feature_settings)
                 self.modulator_nns.append(synthesizer_layer_modulator)
                 self.total_num_biases += synthesizer_layer_modulator.total_num_biases
                 self.total_num_weights += synthesizer_layer_modulator.total_num_weights
@@ -421,6 +495,20 @@ class HyperNetwork(nnx.Module):
             str: The name of the hypernetwork module.
         """
         return self.name
+    
+    def CountTrainableParams(self):
+        """
+        Compute the total number of trainable parameters in this NNX module.
+
+        This method collects all parameters marked as `nnx.Param` within the module's
+        state and sums their element counts to produce the total number of
+        trainable parameters.
+
+        Returns:
+            int: Total count of trainable parameters.
+        """
+        params = nnx.state(self, nnx.Param)
+        return  sum(np.prod(x.shape) for x in jax.tree_util.tree_leaves(params))      
 
     def all_to_all_fw(self,latent_array:jax.Array,coord_matrix:jax.Array,
                             modulator_nn:MLP,synthesizer_nn:MLP):
@@ -674,6 +762,6 @@ class HyperNetwork(nnx.Module):
     
     def __call__(self, latent_array: jax.Array,coord_matrix: jax.Array):
         if self.coupling_settings["modulator_to_synthesizer_coupling_mode"] == "one_modulator_per_synthesizer_layer":
-            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nns,self.synthesizer_nn)
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,self.synthesizer_nn.input_mapping(coord_matrix),self.modulator_nns,self.synthesizer_nn)
         else:
-            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,coord_matrix,self.modulator_nn,self.synthesizer_nn)
+            return jax.vmap(self.fw_func,in_axes=(0, None, None, None))(latent_array,self.synthesizer_nn.input_mapping(coord_matrix),self.modulator_nn,self.synthesizer_nn)

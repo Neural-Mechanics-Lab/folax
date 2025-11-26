@@ -21,9 +21,9 @@ from fol.tools.decoration_functions import *
 
 def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "nn_output_NiN"
+    working_directory_name = "nn_output_test"
     case_dir = os.path.join('.', working_directory_name)
-    create_clean_directory(working_directory_name)
+    # create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     # problem setup
@@ -59,7 +59,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     fourier_control.Initialize()
 
     # create some random coefficients & K for training
-    create_random_coefficients = True
+    create_random_coefficients = False
     if create_random_coefficients:
         number_of_random_samples = 200
         coeffs_matrix,K_matrix = create_random_fourier_samples(fourier_control,number_of_random_samples)
@@ -87,7 +87,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
                                 "prediction_gain":30,
                                 "initialization_gain":1.0},
         "skip_connections_settings": {"active":False,"frequency":1},
-        "latent_size":  64,
+        "latent_size":  8*64,
         "modulator_bias": False,
         "main_loop_transform": 1e-5,
         "latent_step_optimizer": 1e-4,
@@ -134,12 +134,12 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     train_end_id = 8
     train_set_pr = coeffs_matrix[train_start_id:train_end_id,:]     # for parametric training
 
-    test_start_id = 8
-    test_end_id = 10
+    test_start_id = 20
+    test_end_id = 60
     test_set_pr = coeffs_matrix[test_start_id:test_end_id,:]
 
     # OTF or Parametric 
-    parametric_learning = False
+    parametric_learning = True
     if parametric_learning:
         train_set = train_set_pr
         test_set = test_set_pr
@@ -158,21 +158,21 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
                             "test_start_id": test_start_id,
                             "test_end_id": test_end_id}
     
-    ifol.Train(train_set=(train_set,),
-                test_set=(test_set,),
-                test_frequency=100,
-                batch_size=train_settings_dict["batch_size"],
-                convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
-                plot_settings={"plot_save_rate":100},
-                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-                working_directory=case_dir)
+    # ifol.Train(train_set=(train_set,),
+    #             test_set=(test_set,),
+    #             test_frequency=100,
+    #             batch_size=train_settings_dict["batch_size"],
+    #             convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
+    #             plot_settings={"plot_save_rate":100},
+    #             train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+    #             working_directory=case_dir)
 
     # load teh best model
     ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
     U_dict = {}
     for eval_id in tests:
-        ifol_uvw = np.array(ifol.Predict(coeffs_matrix[otf_id].reshape(-1,1).T))
+        ifol_uvw = np.array(ifol.Predict(coeffs_matrix[eval_id].reshape(-1,1).T))
         fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
         fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
 

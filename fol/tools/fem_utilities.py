@@ -510,7 +510,42 @@ class SaintVenant(MaterialModel):
         Se_voigt = self.TensorToVoigt(Se)
         C_tangent = self.FourthTensorToVoigt(C_tangent_fourth)
         return xsie, Se_voigt, C_tangent
-    
+
+class SaintVenantAD(MaterialModel):
+    """
+    Material model.
+    """
+    @partial(jit, static_argnums=(0,))
+    def evaluate(self, E_mat, lambda_, mu, *args, **keyargs):
+        """
+        Evaluate the stress and tangent operator at given local coordinates.
+        This method should be overridden by subclasses.
+        Parameters:
+        F (ndarray): Deformation gradient.
+        args (float): Optional material constants
+        Returns:
+        jnp.ndarray: Values of stress and tangent operator at given local coordinates.
+        """
+        # Supporting functions:
+        E_voigt = self.TensorToVoigt(E_mat)
+
+        def strain_energy(E_voigt):
+            E = self.VoigtToTensor(E_voigt)
+            return 0.5*lambda_*(jnp.linalg.trace(E) ** 2) + mu*jnp.linalg.trace(E @ E)
+        xsie = strain_energy(E_voigt)
+
+        
+        def second_piola(E_voigt):
+            return jax.grad(strain_energy)(E_voigt)
+        Se_voigt = second_piola(E_voigt)
+
+        def tangent(E_voigt):
+            return jax.jacfwd(second_piola)(E_voigt)
+        C_tangent = tangent(E_voigt)
+        
+        return xsie, Se_voigt, C_tangent.squeeze()
+
+
 class NeoHookianModelAD(MaterialModel):
     """
     Material model.

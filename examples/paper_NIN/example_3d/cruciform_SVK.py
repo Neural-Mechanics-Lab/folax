@@ -20,7 +20,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
     working_directory_name = "nn_output_3D_tetra_cruciform_saint_venant"
     case_dir = os.path.join('.', working_directory_name)
-    create_clean_directory(working_directory_name)
+    # create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
     #call the function to create the mesh
@@ -54,6 +54,10 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     coeffs_matrix = np.concatenate((ux_comp,uy_comp),axis=1)
 
     K_matrix = dirichlet_control.ComputeBatchControlledVariables(coeffs_matrix)
+
+    coeffs_matrix_test = np.array([[0.4,0.05],
+                                   [0.05,0.4],
+                                   [0.4,0.4]])
     
     # now we need to create, initialize and train fol
     ifol_settings_dict = {
@@ -133,7 +137,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     
     train_settings_dict = {"batch_size": 1,
                             "num_epoch":ifol_num_epochs,
-                            "parametric_learning": False,
+                            "parametric_learning": True,
                             "OTF_id": eval_id,
                             "train_start_id": train_start_id,
                             "train_end_id": train_end_id,
@@ -144,7 +148,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     if train_settings_dict["parametric_learning"]:
         train_set = train_set_pr
         test_set = test_set_pr
-        tests = range(test_start_id,test_end_id)
+        tests = range(test_start_id,test_start_id+5)
     else:
         train_set = train_set_otf   
         test_set = train_set
@@ -154,26 +158,26 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     print(f"\ncheck...\tParametric learning: {train_settings_dict['parametric_learning']}")
     print(f"\ncheck...\ttraining sample ids: {train_start_id} -> {train_end_id}\n")
 
-    ifol.Train(train_set=(train_set,),
-                test_set=(test_set,),
-                test_frequency=100,
-                batch_size=train_settings_dict["batch_size"],
-                convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
-                plot_settings={"plot_save_rate":100},
-                train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
-                working_directory=case_dir)
+    # ifol.Train(train_set=(train_set,),
+    #             test_set=(test_set,),
+    #             test_frequency=100,
+    #             batch_size=train_settings_dict["batch_size"],
+    #             convergence_settings={"num_epochs":train_settings_dict["num_epoch"],"relative_error":1e-100,"absolute_error":1e-100},
+    #             plot_settings={"plot_save_rate":100},
+    #             train_checkpoint_settings={"least_loss_checkpointing":True,"frequency":10},
+    #             working_directory=case_dir)
 
 
     # load teh best model
-    # ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
+    ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
    
-    for eval_id in tests:
-        iFOL_UVW = np.array(ifol.Predict(coeffs_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
+    for eval_id in range(3):
+        iFOL_UVW = np.array(ifol.Predict(coeffs_matrix_test[eval_id,:].reshape(-1,1).T)).reshape(-1)
         fe_mesh[f'U_iFOL_{eval_id}'] = iFOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
         # solve FE here
         updated_bc = bc_dict.copy()
-        updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix[eval_id,0]},
-                            "Uy":{"bottom":0.,"top":coeffs_matrix[eval_id,1]},
+        updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix_test[eval_id,0]},
+                            "Uy":{"bottom":0.,"top":coeffs_matrix_test[eval_id,1]},
                             "Uz":{"left":0.,"right":0.,"top":0.,"bottom":0.}})
 
         updated_loss_setting = loss_settings.copy()

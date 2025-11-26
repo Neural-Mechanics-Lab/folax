@@ -125,9 +125,9 @@ class FiniteElementNonLinearResidualBasedSolverWithStateUpdate(FiniteElementNonL
                 fol_info(
                     f"\n"
                     f"{indent} ───────── Load Step {load_step} ─────────\n"
-                    f"{indent}   Newton Iteration : {i} (max = {self.nonlinear_solver_settings["maxiter"]})\n"
-                    f"{indent}   Residual Norm    : {res_norm:.3e} (abs_tol = {self.nonlinear_solver_settings["abs_tol"]:.3e})\n"
-                    f"{indent}   Δ DOFs Norm      : {delta_norm:.3e} (rel_tol = {self.nonlinear_solver_settings["rel_tol"]:.3e})\n"
+                    f"{indent}   Newton Iteration : {i} (max = {self.nonlinear_solver_settings['maxiter']})\n"
+                    f"{indent}   Residual Norm    : {res_norm:.3e} (abs_tol = {self.nonlinear_solver_settings['abs_tol']:.3e})\n"
+                    f"{indent}   Δ DOFs Norm      : {delta_norm:.3e} (rel_tol = {self.nonlinear_solver_settings['rel_tol']:.3e})\n"
                     f"{indent}   Converged        : {'True' if newton_converged else 'False'}\n"
                     f"{indent}────────────────────────────────────────────"
                 )

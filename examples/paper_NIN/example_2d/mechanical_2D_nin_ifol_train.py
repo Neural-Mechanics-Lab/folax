@@ -61,7 +61,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # create some random coefficients & K for training
     create_random_coefficients = False
     if create_random_coefficients:
-        number_of_random_samples = 200
+        number_of_random_samples = 20
         coeffs_matrix,K_matrix = create_random_fourier_samples(fourier_control,number_of_random_samples)
         export_dict = model_settings.copy()
         export_dict["coeffs_matrix"] = coeffs_matrix
@@ -71,7 +71,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
         with open(f'fourier_control_dict_N_{model_settings["N"]}.pkl', 'wb') as f:
             pickle.dump(export_dict,f)
     else:
-        with open(f'fourier_control_dict_N_{model_settings["N"]}.pkl', 'rb') as f:
+        with open(f'fourier_control_dict.pkl', 'rb') as f:
             loaded_dict = pickle.load(f)
         
         coeffs_matrix = loaded_dict["coeffs_matrix"]
@@ -134,8 +134,8 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     train_end_id = 8
     train_set_pr = coeffs_matrix[train_start_id:train_end_id,:]     # for parametric training
 
-    test_start_id = 20
-    test_end_id = 60
+    test_start_id = 0
+    test_end_id = 20
     test_set_pr = coeffs_matrix[test_start_id:test_end_id,:]
 
     # OTF or Parametric 

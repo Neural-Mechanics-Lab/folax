@@ -41,24 +41,11 @@ reg_loss.Initialize()
 identity_control.Initialize()
 fourier_control.Initialize()
 
-# create/load some random coefficients & K for training
-create_random_coefficients = False
-if create_random_coefficients:
-    number_of_samples = 10000
-    coeffs_matrix,K_matrix = create_random_fourier_samples(fourier_control,number_of_samples)
-    export_dict = {}
-    export_dict["coeffs_matrix"] = coeffs_matrix
-    export_dict["x_freqs"] = fourier_control.x_freqs
-    export_dict["y_freqs"] = fourier_control.y_freqs
-    export_dict["z_freqs"] = fourier_control.z_freqs
-    with open(f'fourier_3D_control_dict_10K.pkl', 'wb') as f:
-        pickle.dump(export_dict,f)
-else:
-    with open(f'fourier_3D_control_dict_10K.pkl', 'rb') as f:
-        loaded_dict = pickle.load(f)
-    
-    coeffs_matrix = loaded_dict["coeffs_matrix"]
+# load some random coefficients & K for training
+with open(f'fourier_3D_control_dict_10K.pkl', 'rb') as f:
+    loaded_dict = pickle.load(f)
 
+coeffs_matrix = loaded_dict["coeffs_matrix"]
 K_matrix = fourier_control.ComputeBatchControlledVariables(coeffs_matrix)
 
 

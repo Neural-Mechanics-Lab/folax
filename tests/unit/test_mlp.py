@@ -103,6 +103,31 @@ class TestMLP(unittest.TestCase):
 
         np.testing.assert_allclose(np.array(skip_siren_mlp(jnp.array([[1,2,3],[4,5,6],[7,8,9]]))).flatten(), 
                                     np.array([-0.06585833,-0.032813,-0.127911,-0.02603725,-0.20289356,-0.07241035]), rtol=1e-5, atol=1e-6)
+        
+        # now test fourier feature mapping
+        fourier_feature_mlp = MLP(name="ff_mlp",
+                                  input_size=2,
+                                  output_size=1,
+                                  hidden_layers=[5,5,5,5],
+                                  activation_settings={"type":"relu"},
+                                  fourier_feature_settings={"active":True,"size":5,"frequency_scale":1.0,"learn_frequency":False})    
+
+        np.testing.assert_allclose(np.array(fourier_feature_mlp.B).flatten(), 
+                                   np.array( [0.07520543038845062, 0.1719243973493576, 0.841088593006134, -0.5837331414222717, -0.11038121581077576, -1.5184602737426758, 1.1545977592468262, 0.25870752334594727, -0.045513253659009933, -0.3583025634288788] ), rtol=1e-5, atol=1e-6)    
+        
+        np.testing.assert_allclose(np.array(fourier_feature_mlp(jax.random.normal(jax.random.PRNGKey(42),(10,2)))).flatten(), 
+                                   np.array( [-0.626466691493988, -0.19476424157619476, -0.027989299967885017, -0.04137006029486656, 0.0, -0.17605000734329224, 0.0, -0.10535581409931183, -0.1355840414762497, -0.040048614144325256] ), rtol=1e-5, atol=1e-6)
+
+        self.assertEqual(fourier_feature_mlp.CountTrainableParams(),151)
+
+        trainable_fourier_feature_mlp = MLP(name="ff_mlp",
+                                  input_size=2,
+                                  output_size=1,
+                                  hidden_layers=[5,5,5,5],
+                                  activation_settings={"type":"relu"},
+                                  fourier_feature_settings={"active":True,"size":5,"frequency_scale":1.0,"learn_frequency":True})
+        self.assertEqual(trainable_fourier_feature_mlp.CountTrainableParams(),161)         
+
 
 if __name__ == '__main__':
     unittest.main()

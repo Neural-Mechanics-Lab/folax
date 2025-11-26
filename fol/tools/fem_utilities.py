@@ -9,7 +9,8 @@ fem_utilities.py
 A module for performing basic finite element operations.
 """
 import jax.numpy as jnp
-from jax import jit
+from jax import jit,lax
+import jax
 from functools import partial
 import jax
 
@@ -482,6 +483,256 @@ class NeoHookianModel2D(MaterialModel):
         C_tangent = self.FourthTensorToVoigt(C_tangent_fourth)
         return xsie, Se_voigt, C_tangent
     
+
+
+# ---------- Public API inside your model: get C_alg via AD ----------
+class ElastoplasticityModel2D(MaterialModel):
+
+    @staticmethod    # ---------- helpers to pack/unpack 2D Voigt ----------
+    def voigt2_to_tensor(v):
+        # v = [xx, yy, xy_tensor] (xy is tensor shear, not engineering)
+        return jnp.array([[v[0], v[2]],
+                        [v[2], v[1]]], dtype=v.dtype)
+    @staticmethod
+    def tensor2_to_voigt(T):
+        # inverse of above (xy is tensor shear component)
+        return jnp.array([T[0,0], T[1,1], T[0,1]], dtype=T.dtype)
+    @staticmethod
+    def to3D_from_2D_plane_strain(A2, Azz=0.0):
+        A3 = jnp.zeros((3,3), dtype=A2.dtype)
+        A3 = A3.at[0:2, 0:2].set(A2)
+        A3 = A3.at[2,2].set(Azz)
+        return A3
+    @staticmethod
+    # (optional) Map 3x3 Voigt -> 4th-order tensor in 2D (xx,yy,xy_tensor ordering)
+    def voigt33_to_C4_2D(Cv):
+        # Cv order: [xx,yy,xy]x[xx,yy,xy] with tensor-shear in xy
+        # Build 4th-order C_ijkl (i,j,k,l in {x,y}) consistent with our Voigt convention
+        C = jnp.zeros((2,2,2,2), dtype=Cv.dtype)
+        # helper: map (xx->0, yy->1, xy->2)
+        def idx_pair(a):
+            return (0,0) if a==0 else (1,1) if a==1 else (0,1)
+        def sym_set(C, i,j,k,l, val):
+            # enforce minor symmetries: ij and kl
+            C = C.at[i,j,k,l].set(val)
+            C = C.at[j,i,k,l].set(val)
+            C = C.at[i,j,l,k].set(val)
+            C = C.at[j,i,l,k].set(val)
+            return C
+        for a in range(3):
+            for b in range(3):
+                i,j = idx_pair(a)
+                k,l = idx_pair(b)
+                C = sym_set(C, i,j,k,l, Cv[a,b])
+        return C
+
+    # ---------- Elasticity in 3D ----------
+    @staticmethod
+    def C_elastic_3D(E, nu):
+        I3 = jnp.eye(3)
+        lam = E*nu / ((1+nu)*(1-2*nu))
+        G   = E/(2*(1+nu))
+        def C_dot(e3):
+            tr = jnp.trace(e3)
+            return lam*tr*I3 + 2.0*G*e3
+        return lam, G, C_dot
+
+    # ---------- Newton solver made JAX-differentiable ----------
+    @staticmethod
+    def newton_solve(R, x0, maxit=60, tol=1e-3):
+
+        # run fixed number of iterations but allow early stop with no-op steps
+        def while_cond(state):
+            x, k = state
+            r = R(x)
+            return jnp.logical_and(jnp.linalg.norm(r) > tol, k < maxit)
+
+        def while_body(state):
+            x, k = state
+            r = R(x)
+            J = jax.jacfwd(R)(x)
+            dx = jnp.linalg.solve(J, -r)
+            return (x + dx, k + 1)
+
+        x_final, _ = jax.lax.while_loop(while_cond, while_body, (x0, 0))
+        return x_final
+
+    # ---------- Plasticity helpers ----------
+    @staticmethod
+    def tr3(A): return jnp.trace(A)
+    @staticmethod
+    def frob(A): return jnp.sqrt(jnp.tensordot(A, A))
+    @staticmethod
+    def dev3(A):
+        I3 = jnp.eye(3, dtype=A.dtype)
+        return A - I3 * (ElastoplasticityModel2D.tr3(A) / 3.0)
+    @staticmethod
+    def flow_normal(sig3):
+        s   = ElastoplasticityModel2D.dev3(sig3)
+        seq = jnp.sqrt(1.5) * ElastoplasticityModel2D.frob(s)
+        inv = jnp.where(seq > 0.0, 1.0/seq, 0.0)
+        return 1.5 * s * inv
+
+    # ---------- Core: one local integration step as a pure function ----------
+    @staticmethod
+    def local_update(ts2, ps2_n, xi_n, E, nu, h1, h2, y0):
+        """
+        Inputs:
+        ts2   : total strain (2x2 tensor) at current step
+        ps2_n : plastic strain at previous step (2x2)
+        xi_n  : cum. plastic strain at previous step (scalar)
+        Returns:
+        sig2_v  : Cauchy stress (2D Voigt, length 3)
+        ps2_new : updated plastic strain (2x2)
+        xi_n1   : updated cum. plastic strain (scalar)
+        """
+        _, _, C_dot = ElastoplasticityModel2D.C_elastic_3D(E, nu)
+
+        # plane strain embeddings
+        ps_zz  = -(ps2_n[0,0] + ps2_n[1,1])
+        ps3_n  = ElastoplasticityModel2D.to3D_from_2D_plane_strain(ps2_n, ps_zz)
+        ts3    = ElastoplasticityModel2D.to3D_from_2D_plane_strain(ts2, 0.0)
+
+        # trial state
+        es_trial  = ts3 - ps3_n
+        sig_trial = C_dot(es_trial)
+        s_trial   = ElastoplasticityModel2D.dev3(sig_trial)
+        sig_eq    = jnp.sqrt(1.5) * ElastoplasticityModel2D.frob(s_trial)
+        yl        = y0 + h1*(1.0 - jnp.exp(-h2*xi_n))
+        f_yield   = sig_eq - yl
+
+        # Elastic return: no plastic flow
+        def elastic_return():
+            sig2 = sig_trial[0:2, 0:2]
+            sig2_v = ElastoplasticityModel2D.tensor2_to_voigt(sig2)
+            return sig2_v, ps2_n, xi_n
+        
+        # Plastic return: solve for plastic multiplier
+        def plastic_return():
+            def make_residual():
+                def R(dx):
+                    depsp_v = dx[:-1]
+                    dp      = dx[-1]
+                    
+                    # Update plastic strain
+                    depsp2 = ElastoplasticityModel2D.voigt2_to_tensor(depsp_v)
+                    epsp2  = ps2_n + depsp2
+                    epsp_zz = -(epsp2[0,0] + epsp2[1,1])
+                    epsp3   = ElastoplasticityModel2D.to3D_from_2D_plane_strain(epsp2, epsp_zz)
+                    
+                    # Compute stress
+                    eps3 = ts3
+                    ee3  = eps3 - epsp3
+                    sig3 = C_dot(ee3)
+                    
+                    # Deviatoric stress and equivalent stress
+                    s3  = ElastoplasticityModel2D.dev3(sig3)
+                    seq = jnp.sqrt(1.5) * ElastoplasticityModel2D.frob(s3)
+                    
+                    # Flow normal
+                    n3 = s3 / (seq + 1e-12)  # Avoid division by zero
+                    n2 = n3[0:2, 0:2]
+                    n_v = jnp.array([n2[0,0], n2[1,1], n2[0,1]], dtype=n2.dtype)
+                    
+                    # Residuals
+                    r_flow = depsp_v - n_v * dp
+                    r_yield = seq - (y0 + h1*(1.0 - jnp.exp(-h2*(xi_n + dp))))
+                    
+                    return jnp.concatenate([r_flow, jnp.array([r_yield])], axis=0)
+                
+                return R
+            
+            R = make_residual()
+            x0 = jnp.zeros((4,))
+            x = ElastoplasticityModel2D.newton_solve(R, x0, maxit=60, tol=1e-3)
+            
+            dps_v = x[:-1]
+            dp    = x[-1]
+            
+            # Update plastic variables
+            dps2 = ElastoplasticityModel2D.voigt2_to_tensor(dps_v)
+            ps2_new = ps2_n + dps2
+            xi_n1 = xi_n + dp
+            
+            # Compute final stress
+            ps_zz_new = -(ps2_new[0,0] + ps2_new[1,1])
+            ps3_new   = ElastoplasticityModel2D.to3D_from_2D_plane_strain(ps2_new, ps_zz_new)
+            es    = ts3 - ps3_new
+            sig3  = C_dot(es)
+            sig2  = sig3[0:2, 0:2]
+            sig2_v = ElastoplasticityModel2D.tensor2_to_voigt(sig2)
+            
+            return sig2_v, ps2_new, xi_n1
+        
+        # Choose elastic or plastic return
+        return jax.lax.cond(f_yield <= 0.0, elastic_return, plastic_return)
+
+    @partial(jit, static_argnums=(0,))
+    def evaluate(self, E, nu, h1, h2, y0, ts, state):
+        """
+        Returns:
+          C_alg_4 : 4th-order tangent in 2D (i,j,k,l over x,y)  OR you can return the 3x3 Voigt if you prefer
+          sig2_v  : stress in 2D Voigt (length 3)
+          ps_new  : updated plastic strain tensor (2x2)
+          xi_n1   : updated cum. plastic strain (scalar)
+        """
+        ps_v  = state[:3]
+        xi_n=state[3]
+        ps=ElastoplasticityModel2D.voigt2_to_tensor(ps_v)
+
+        # 1) do the usual local update to get stress at the given ts
+        sig2_v, ps_new, xi_n1 = ElastoplasticityModel2D.local_update(ts, ps, xi_n, E, nu, h1, h2, y0)
+
+        # 2) define a pure function "stress(ts_v)" so we can differentiate w.r.t. total strain
+        def stress_voigt_from_ts_voigt(ts_v_flat):
+            ts2 = ElastoplasticityModel2D.voigt2_to_tensor(ts_v_flat)
+            sig2_v_loc, _, _ = ElastoplasticityModel2D.local_update(ts2, ps, xi_n, E, nu, h1, h2, y0)
+            return sig2_v_loc  # length-3 Voigt vector
+
+        # 3) automatic differentiation: d(sig_voigt)/d(eps_voigt) -> (3x3) plane-strain tangent in Voigt
+        ts_v = ElastoplasticityModel2D.tensor2_to_voigt(ts)
+        C_voigt = jax.jacfwd(stress_voigt_from_ts_voigt)(ts_v)  # shape (3,3)
+
+        # 4) (optional) lift to a true 4th-order tensor in 2D
+
+        ps_v = ElastoplasticityModel2D.tensor2_to_voigt(ps_new)             # shape (3,)
+        state_vec = jnp.concatenate([ps_v, jnp.array([xi_n1])])  # shape (4,)
+
+        return C_voigt, sig2_v, state_vec
+    
+class JAXNewton:
+    def __init__(self, maxit=50, tol=1e-3):
+        self.maxit = maxit
+        self.tol = tol
+
+    def solve(self, R, x0):
+        """
+        R: residual function R(x) -> (m,), with m == len(x)
+        x0: initial guess
+        returns: x, info dict
+        """
+        x = x0
+        for k in range(self.maxit):
+            r = R(x)
+            nrm = jnp.linalg.norm(r)
+
+            # Use lax.cond() to check the residual norm condition
+            def condition_met_fn(x):
+                return x
+
+            def continue_iteration_fn(x):
+                J = jax.jacfwd(R)(x)  # Compute Jacobian
+                dx = jnp.linalg.solve(J, -r)  # Solve for the step
+                x_new = x + dx
+                return x_new
+
+            # Apply the condition and either exit the loop or continue
+            x= lax.cond(nrm < self.tol, condition_met_fn, continue_iteration_fn, x)
+
+        # Final residual after the loop
+        r = R(x)
+        nrm = jnp.linalg.norm(r)
+        return x
 class NeoHookianModelAD(MaterialModel):
     """
     Material model.

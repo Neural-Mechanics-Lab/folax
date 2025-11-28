@@ -72,12 +72,64 @@ class DataDrivenFourierParametricOperatorLearning(FourierParametricOperatorLearn
     
 class PhysicsInformedFourierParametricOperatorLearning(FourierParametricOperatorLearning):
 
-    def ComputeBatchLossValue(self,batch:Tuple[jnp.ndarray, jnp.ndarray],nn_model:nnx.Module):
+    def ComputeBatchLossValue(
+        self,
+        batch: Tuple[jnp.ndarray, jnp.ndarray],
+        nn_model: nnx.Module,
+    ):
+        # 1) FE controls and NN predictions
         control_outputs = self.control.ComputeBatchControlledVariables(batch[0])
-        batch_predictions = self.ComputeBatchPredictions(control_outputs,nn_model)
-        batch_loss,(batch_min,batch_max,batch_avg) = self.loss_function.ComputeBatchLoss(control_outputs,batch_predictions)
+        batch_predictions = self.ComputeBatchPredictions(control_outputs, nn_model)
+
+        # 2) Standard energy-based batch loss (as before)
+        batch_loss, (batch_min, batch_max, batch_avg) = \
+            self.loss_function.ComputeBatchLoss(control_outputs, batch_predictions)
         loss_name = self.loss_function.GetName()
-        return batch_loss, ({loss_name+"_min":batch_min,
-                             loss_name+"_max":batch_max,
-                             loss_name+"_avg":batch_avg,
-                             "total_loss":batch_loss})
+
+        # 3) --- NEW: FE residual RMS for each sample in the batch ---
+
+        def residual_for_sample(ctrl_sample, dofs_sample):
+            """
+            ctrl_sample  : control field for one sample (e.g. K(x,y))
+            dofs_sample  : NN-predicted dofs for one sample (u,v at nodes)
+            returns      : RMS residual for this sample
+            """
+            # flatten
+            ctrl_flat = ctrl_sample.reshape(-1)
+            dofs_flat = dofs_sample.reshape(-1)
+
+            # apply Dirichlet BCs → full DOF vector (same logic as ComputeBatchLoss)
+            full_dof_vec = self.loss_function.GetFullDofVector(
+                ctrl_flat[jnp.newaxis, :],   # first arg is ignored if parametric_boundary_learning=False
+                dofs_flat[jnp.newaxis, :],
+            )[0]
+
+            # FE residual RMS for this sample
+            return self.loss_function.ComputeResidualNorm(
+                ctrl_flat,
+                full_dof_vec,
+                relative=True,   # RMS (norm / sqrt(N_unknown))
+            )
+
+        # vmap over batch: shape (batch_size,)
+        residual_rms_per_sample = jax.vmap(residual_for_sample)(
+            control_outputs,
+            batch_predictions,
+        )
+
+        residual_rms_batch_mean = jnp.mean(residual_rms_per_sample)
+        residual_rms_batch_min  = jnp.min(residual_rms_per_sample)
+        residual_rms_batch_max  = jnp.max(residual_rms_per_sample)
+
+        # 4) Return batch loss + metrics dict
+        metrics = {
+            loss_name + "_min": batch_min,
+            loss_name + "_max": batch_max,
+            loss_name + "_avg": batch_avg,
+            "total_loss": batch_loss,
+            "residual_rms_batch_mean": residual_rms_batch_mean,
+            "residual_rms_batch_min":  residual_rms_batch_min,
+            "residual_rms_batch_max":  residual_rms_batch_max,
+        }
+
+        return batch_loss, metrics

@@ -139,8 +139,9 @@ class ImplicitParametricOperatorLearning(DeepNetwork):
     @print_with_timestamp_and_execution_time
     @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def Predict(self,batch_X):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
         preds = self.ComputeBatchPredictions(batch_X,self.flax_neural_network)
-        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
+        return self.loss_function.GetFullDofVector(control_outputs,preds.reshape(preds.shape[0], -1))
 
     @print_with_timestamp_and_execution_time
     @partial(nnx.jit, donate_argnums=(1,), static_argnums=(0,2))

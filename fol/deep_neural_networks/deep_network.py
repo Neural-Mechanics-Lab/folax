@@ -138,7 +138,7 @@ class DeepNetwork(ABC):
         nn, opt = state
         (_,batch_dict), batch_grads = nnx.value_and_grad(self.ComputeBatchLossValue,argnums=1,has_aux=True) \
                                                                     (data,nn)
-        opt.update(nn,batch_grads)
+        opt.update(batch_grads)  
         return batch_dict["total_loss"]
     
     @partial(nnx.jit, static_argnums=(0,))
@@ -170,9 +170,16 @@ class DeepNetwork(ABC):
 
         default_plot_settings = copy.deepcopy(self.default_plot_settings)
         default_plot_settings["save_directory"] = working_directory
-        plot_settings = UpdateDefaultDict(default_plot_settings,plot_settings)
+        plot_settings = UpdateDefaultDict(default_plot_settings, plot_settings)
         plot_settings["test_frequency"] = test_frequency
         fol_info(f"plot settings:{plot_settings}")
+
+        # --- NEW: make sure `total_loss` is always tracked, and store plot_list ---
+        plot_list = list(plot_settings["plot_list"])
+        if "total_loss" not in plot_list:
+            plot_list.insert(0, "total_loss")
+        plot_settings["plot_list"] = plot_list
+
 
         default_restore_nnx_state_settings = copy.deepcopy(self.default_restore_nnx_state_settings)
         default_restore_nnx_state_settings["state_directory"] = working_directory + "/" + default_restore_nnx_state_settings["state_directory"]
@@ -251,8 +258,10 @@ class DeepNetwork(ABC):
 
         def train_loop():
 
-            train_history_dict = {"total_loss":[]}
-            test_history_dict = {"total_loss":[]}
+            # one entry per metric name in plot_list
+            train_history_dict = {name: [] for name in plot_list}
+            test_history_dict  = {name: [] for name in plot_list}
+
             pbar = trange(convergence_settings["num_epochs"])
             converged = False
             rng, _ = jax.random.split(jax.random.PRNGKey(0))
@@ -274,11 +283,34 @@ class DeepNetwork(ABC):
                 rng, sub = jax.random.split(rng)
                 order = jax.random.permutation(sub, len(train_set[0])).reshape(-1, batch_size)
                 _, losses = train_multiple_steps_with_idxs(state, train_set, order)
-                train_history_dict["total_loss"].append(losses.mean())
-                
+
+                # --- train: total_loss from mini-batch loop ---
+                epoch_train_total = losses.mean()
+                train_history_dict["total_loss"].append(float(epoch_train_total))
+
+                # --- train: extra metrics (e.g. residual_rms_sample0) evaluated on full train_set ---
+                if len(plot_list) > 1:
+                    _, train_metrics = self.ComputeBatchLossValue(train_set, state[0])
+                    for name in plot_list:
+                        if name == "total_loss":
+                            continue  # already stored
+                        if name in train_metrics:
+                            train_history_dict[name].append(float(train_metrics[name]))
+
                 # test step
                 if len(test_set[0])>0 and ((epoch)%test_frequency==0 or epoch==convergence_settings["num_epochs"]-1):
-                    test_history_dict["total_loss"].append(self.TestStep(state,test_set))
+                    epoch_test_total = self.TestStep(state, test_set)
+                    test_history_dict["total_loss"].append(float(epoch_test_total))
+
+                    # extra test metrics (e.g. residual_rms_sample0) on full test set
+                    if len(plot_list) > 1:
+                        _, test_metrics = self.ComputeBatchLossValue(test_set, state[0])
+                        for name in plot_list:
+                            if name == "total_loss":
+                                continue
+                            if name in test_metrics:
+                                test_history_dict[name].append(float(test_metrics[name]))
+
                 
                 # print step   
                 if len(test_set[0])>0:

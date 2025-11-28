@@ -21,7 +21,7 @@ from fol.tools.decoration_functions import *
 
 def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "nn_output_test"
+    working_directory_name = "nn_output_test"   # should be the same dir that contains network parameters
     case_dir = os.path.join('.', working_directory_name)
     # create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
@@ -48,11 +48,13 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
 
     mechanical_loss_2d.Initialize()
 
+    # define a control class which reconstrcut the input space from a reduced space
+    # identity control maps X: -> X
     identity_control = IdentityControl('identity_control', control_settings={},num_vars=fe_mesh.GetNumberOfNodes())
     identity_control.Initialize()
     
     
-    # fourier control
+    # define fourier control to create synthethic microstructures
     fourier_control_settings = {"x_freqs":np.array([2,4,6]),"y_freqs":np.array([2,4,6]),"z_freqs":np.array([0]),
                                 "beta":20,"min":1e-1,"max":1}
     fourier_control = FourierControl("fourier_control",fourier_control_settings,fe_mesh)
@@ -79,7 +81,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     K_matrix = fourier_control.ComputeBatchControlledVariables(coeffs_matrix)
 
 
-    # now we need to create, initialize and train fol
+    # now we need to create, initialize and train ifol
     ifol_settings_dict = {
         "characteristic_length": 64,
         "synthesizer_depth": 4,
@@ -127,11 +129,12 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
                                                             num_latent_iterations=3)
     ifol.Initialize()
 
+    # split the data to train and test sets
     otf_id = 0
     train_set_otf = coeffs_matrix[otf_id,:].reshape(-1,1).T     # for On The Fly training
 
-    train_start_id = 0
-    train_end_id = 8
+    train_start_id = 20
+    train_end_id = 8000
     train_set_pr = coeffs_matrix[train_start_id:train_end_id,:]     # for parametric training
 
     test_start_id = 0
@@ -148,7 +151,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
         train_set = train_set_otf   
         test_set = train_set
         tests = [otf_id]
-    #here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
+    # here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
     train_settings_dict = {"batch_size": 1,
                             "num_epoch":ifol_num_epochs,
                             "parametric_learning": parametric_learning,
@@ -158,6 +161,7 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
                             "test_start_id": test_start_id,
                             "test_end_id": test_end_id}
     
+    # # train the network, if one does not use a pretrained network
     # ifol.Train(train_set=(train_set,),
     #             test_set=(test_set,),
     #             test_frequency=100,
@@ -170,13 +174,14 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
     # load teh best model
     ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
-    U_dict = {}
     for eval_id in tests:
-        ifol_uvw = np.array(ifol.Predict(coeffs_matrix[eval_id].reshape(-1,1).T))
+        # predict the result from ifol
+        ifol_uvw = np.array(ifol.Predict(coeffs_matrix[eval_id].reshape(-1,1).T)).reshape(-1)
         fe_mesh[f'iFOL_U_{eval_id}'] = ifol_uvw.reshape((fe_mesh.GetNumberOfNodes(), 2))
         fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
+        iFOL_stress = compute_stress_neohooke_quad(loss_function=mechanical_loss_2d, disp_field_vec=jnp.array(ifol_uvw), K_matrix=jnp.array(K_matrix[eval_id,:]))
 
-        # solve FE here
+        # solve FE here to compare the result
         if solve_FE:
             fe_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                         "nonlinear_solver_settings":{"rel_tol":1e-7,"abs_tol":1e-7,
@@ -190,17 +195,15 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
             abs_err = abs(FE_UVW.reshape(-1,1) - ifol_uvw.reshape(-1,1))
             fe_mesh[f"abs_U_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 2))
 
-            U_dict[f'U_iFOL_{eval_id}'] = ifol_uvw
-            U_dict[f"abs_error_{eval_id}"] = abs_err
-            U_dict[f'K_matrix_{eval_id}'] = K_matrix[eval_id,:]
-            U_dict[f'U_FE_{eval_id}'] = FE_UVW
+            FE_stress = compute_stress_neohooke_quad(loss_function=mechanical_loss_2d, disp_field_vec=jnp.array(FE_UVW), K_matrix=jnp.array(K_matrix[eval_id,:]))
+            stress_error = abs(iFOL_stress.reshape(-1) - FE_stress.reshape(-1))
+            fe_mesh[f"FE_FirstPiola_{eval_id}"] = FE_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            fe_mesh[f"iFOL_FirstPiola_{eval_id}"] = iFOL_stress.reshape((fe_mesh.GetNumberOfNodes(), 3))
+            fe_mesh[f"error_FirstPiola_{eval_id}"] = stress_error.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
-            # # save solution for base resolution as fields in a pkl file.  
-            # with open(f"U_base_res_{model_settings['N']}_bc_{model_settings['Ux_right']}.pkl" , 'wb') as f:
-            #     pickle.dump(U_dict,f)
 
         if solve_NiN:
-            # hybrid solver
+            # solve the Newton-Raphson initialized by ifol in one load increment
             fol_info("solve fe hybrid in one load step")
             nin_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                         "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
@@ -216,11 +219,12 @@ def main(ifol_num_epochs=10,solve_FE=False,solve_NiN=False,clean_dir=False):
             fe_mesh[f'NiN_U_{eval_id}'] = NiN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 2))
             fe_mesh[f"K_{eval_id}"] = K_matrix[eval_id,:].reshape((fe_mesh.GetNumberOfNodes(),1))
 
+            # plot the result
             plot_iFOL_HFE(topology_field=K_matrix[eval_id,:], ifol_sol_field=ifol_uvw.reshape(2*fe_mesh.GetNumberOfNodes()), hfe_sol_field=NiN_UVW,
                      err_sol_field=abs_err, file_name=os.path.join(case_dir,'plots')+f"/ifol_fe-nin_error_{eval_id}",
                      fig_titles=['Elasticity Morph.','iFOL','FE-NIN','iFOL-FE Abs Diff.'])
 
-
+    # export the result in a .vtk file
     fe_mesh.Finalize(export_dir=case_dir)
 
     if clean_dir:

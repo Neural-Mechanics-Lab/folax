@@ -18,7 +18,7 @@ from mechanical3d_utilities import *
 
 def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # directory & save handling
-    working_directory_name = "nn_output_3D_tetra_cruciform_saint_venant"
+    working_directory_name = "nn_output_3D_tetra_cruciform_saint_venant"    # should be the same dir that contains network parameters
     case_dir = os.path.join('.', working_directory_name)
     # create_clean_directory(working_directory_name)
     sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
@@ -38,13 +38,13 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     mechanical_loss_3d.Initialize()
 
     
-    # dirichlet control
+    # create dirichlet control to introduce the boundaries from which network learns
     dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"top"}}}
     dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                          fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
     dirichlet_control.Initialize()
 
-    # create some random coefficients & K for training
+    # create some random values for boundaries
     mean, std, n_samples = 0.2, 0.05, 1000
     #coeffs_matrix = np.random.normal(loc=mean, scale=std, size=(n_samples,3))
     np.random.seed(42)
@@ -91,7 +91,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                                 modulator_nn=modulator_nn,synthesizer_nn=synthesizer_nn,
                                 coupling_settings={"modulator_to_synthesizer_coupling_mode":"one_modulator_per_synthesizer_layer"})
 
-    # create fol optax-based optimizer
+    # create optax-based optimizer
     #learning_rate_scheduler = optax.linear_schedule(init_value=1e-4, end_value=1e-7, transition_steps=num_epochs)
     main_loop_transform = optax.chain(optax.adam(ifol_settings_dict["main_loop_transform"]))
     latent_step_optimizer = optax.chain(optax.adam(ifol_settings_dict["latent_step_optimizer"]))
@@ -102,7 +102,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # main_loop_transform = optax.chain(optax.rmsprop(ifol_settings_dict["main_loop_transform"]))
     # latent_step_optimizer = optax.chain(optax.rmsprop(ifol_settings_dict["latent_step_optimizer"]))
 
-     # create fol
+    # create ifol
     meta_alpha = True
     if meta_alpha:
         ifol = MetaAlphaMetaImplicitParametricOperatorLearning(name="meta_implicit_fol",control=dirichlet_control,
@@ -121,6 +121,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
                                                             num_latent_iterations=3)
     ifol.Initialize()
 
+    # split train and test set
     eval_id = 13
     train_set_otf = coeffs_matrix[eval_id,:].reshape(-1,1).T     # for On The Fly training
     
@@ -135,7 +136,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     # test_set_pr = K_matrix[test_start_id,test_end_id]
     test_set_pr = coeffs_matrix[test_start_id:test_end_id,:]
     
-    train_settings_dict = {"batch_size": 1,
+    train_settings_dict = {"batch_size": 100,
                             "num_epoch":ifol_num_epochs,
                             "parametric_learning": True,
                             "OTF_id": eval_id,
@@ -153,11 +154,8 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         train_set = train_set_otf   
         test_set = train_set
         tests = [eval_id]
-    #here we train for single sample at eval_id but one can easily pass the whole coeffs_matrix
-    print(f"\ncheck...\tBCs for sample no. {eval_id}: {coeffs_matrix[eval_id,:]}")
-    print(f"\ncheck...\tParametric learning: {train_settings_dict['parametric_learning']}")
-    print(f"\ncheck...\ttraining sample ids: {train_start_id} -> {train_end_id}\n")
 
+    # # train the network, if one does not use a pretrained network
     # ifol.Train(train_set=(train_set,),
     #             test_set=(test_set,),
     #             test_frequency=100,
@@ -172,9 +170,10 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
     ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
    
     for eval_id in range(3):
+        # predict the result from ifol
         iFOL_UVW = np.array(ifol.Predict(coeffs_matrix_test[eval_id,:].reshape(-1,1).T)).reshape(-1)
         fe_mesh[f'U_iFOL_{eval_id}'] = iFOL_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
-        # solve FE here
+        # solve FE here to compare the result
         updated_bc = bc_dict.copy()
         updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix_test[eval_id,0]},
                             "Uy":{"bottom":0.,"top":coeffs_matrix_test[eval_id,1]},
@@ -196,6 +195,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
         abs_err = abs(FE_UVW.reshape(-1,1) - iFOL_UVW.reshape(-1,1))
         fe_mesh[f"abs_error_{eval_id}"] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
         try:
+            # solve by Newton-Raphson initialized by ifol in one load increment
             nin_setting = {"linear_solver_settings":{"solver":"JAX-direct"},
                     "nonlinear_solver_settings":{"rel_tol":1e-8,"abs_tol":1e-8,
                                                     "maxiter":30,"load_incr":1}}
@@ -207,7 +207,7 @@ def main(ifol_num_epochs=10,solve_FE=False,clean_dir=False):
             NIN_UVW = np.zeros(3*fe_mesh.GetNumberOfNodes())
         fe_mesh[f'U_NIN_{eval_id}'] = NIN_UVW.reshape((fe_mesh.GetNumberOfNodes(), 3))
         
-
+    # export the result in a .vtk file
     fe_mesh.Finalize(export_dir=case_dir)
 
     if clean_dir:

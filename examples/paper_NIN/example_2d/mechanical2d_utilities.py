@@ -10,6 +10,9 @@ import json
 from datetime import datetime
 from matplotlib import gridspec
 from pathlib import Path
+from functools import partial
+import jax
+from jax import jit
 
 def create_tpms_gyroid(fe_mesh: Mesh, tpms_settings: dict) -> jnp.ndarray:
     """
@@ -1035,3 +1038,114 @@ def plot_norm_iter(data,plot_name='res_norm_iter',type=None):
     plt.savefig(f"{file_path}.png")
     print(f"plot saved to {file_path}")
     plt.close()
+
+def compute_nodal_values_from_gauss(total_stress, element_nodes, num_nodes):
+    """
+    total_stress: (num_elements, num_gauss, num_components)
+    element_nodes: (num_elements, num_gauss)
+    """
+
+    num_elements, num_gauss, num_comp = total_stress.shape
+
+    # Flatten
+    flat_nodes = element_nodes.reshape(-1)                     # (num_elements*num_gauss,)
+    flat_stress = total_stress.reshape(-1, num_comp)          # (num_elements*num_gauss, num_comp)
+
+    # Count contributions per node
+    node_counts = jax.ops.segment_sum(
+        data=jnp.ones_like(flat_nodes),
+        segment_ids=flat_nodes,
+        num_segments=num_nodes
+    )
+
+    # Sum stresses per node
+    node_stress_sum = jax.ops.segment_sum(
+        data=flat_stress,
+        segment_ids=flat_nodes,
+        num_segments=num_nodes
+    )
+
+    # Avoid division by zero
+    node_counts = jnp.maximum(node_counts, 1)
+
+    nodal_stress = node_stress_sum / node_counts[:, None]
+    return nodal_stress
+
+@partial(jit, static_argnums=0)
+def compute_stress_neohooke_quad(loss_function, disp_field_vec:jnp.ndarray, K_matrix:jnp.ndarray):
+    element_nodes = loss_function.fe_mesh.GetElementsNodes(loss_function.element_type)
+    total_control_vars = K_matrix.reshape(-1,1)
+
+    def create_S_mat(S:jnp.ndarray):
+        if S.size == 3:
+            S_mat = jnp.zeros((2,2))
+            S_mat = S_mat.at[0,0].set(S[0,0])
+            S_mat = S_mat.at[0,1].set(S[2,0])
+            S_mat = S_mat.at[1,0].set(S[2,0])
+            S_mat = S_mat.at[1,1].set(S[1,0])
+        elif S.size == 6:
+            S_mat = jnp.zeros((3,3))
+            S_mat = S_mat.at[0,0].set(S[0,0])
+            S_mat = S_mat.at[0,1].set(S[5,0])
+            S_mat = S_mat.at[0,2].set(S[4,0])
+            S_mat = S_mat.at[1,0].set(S[5,0])
+            S_mat = S_mat.at[1,1].set(S[1,0])
+            S_mat = S_mat.at[1,2].set(S[3,0])
+            S_mat = S_mat.at[2,0].set(S[4,0])
+            S_mat = S_mat.at[2,1].set(S[3,0])
+            S_mat = S_mat.at[2,2].set(S[2,0])
+        return S_mat
+
+    @partial(jit)
+    def ComputeElementStressAtGauss(xyze,de,uvwe):
+        @jit
+        def compute_at_gauss_point(gp_point):
+            N_vec = loss_function.fe_element.ShapeFunctionsValues(gp_point)
+            DN_DX_T = loss_function.fe_element.ShapeFunctionsGlobalGradients(xyze,gp_point).T
+            J = loss_function.fe_element.Jacobian(xyze,gp_point)
+
+            e_at_gauss = jnp.dot(N_vec, de.squeeze())
+            k_at_gauss = e_at_gauss / (3 * (1 - 2*loss_function.v))
+            mu_at_gauss = e_at_gauss / (2 * (1 + loss_function.v))
+            lambda_at_gauss = e_at_gauss*loss_function.v/((1+loss_function.v)*(1-2*loss_function.v))
+
+            _,F,_ = loss_function.CalculateKinematics(DN_DX_T,uvwe)
+            _,S,_ = loss_function.material_model.evaluate(F,k_at_gauss,mu_at_gauss,lambda_=lambda_at_gauss)
+            S_mat = create_S_mat(S)
+            P = jnp.dot(F,S_mat)    # first Piola Kirchhoff stress tensor
+            P = loss_function.material_model.TensorToVoigt(P)
+            return P.flatten()
+        gp_points,_ = loss_function.fe_element.GetIntegrationData()
+        stress_at_gauss = jax.vmap(compute_at_gauss_point,in_axes=(0,))(gp_points)
+        return stress_at_gauss
+    
+    @partial(jit)
+    def ComputeElementStressVmapCompatible(element_id:jnp.integer,
+                                            elements_nodes:jnp.array,
+                                            xyz:jnp.array,
+                                            full_control_vector:jnp.array,
+                                            full_dof_vector:jnp.array):
+            return ComputeElementStressAtGauss(xyz[elements_nodes[element_id],:],
+                                            full_control_vector[elements_nodes[element_id]],
+                                            full_dof_vector[((loss_function.number_dofs_per_node*elements_nodes[element_id])[:, jnp.newaxis] +
+                                            jnp.arange(loss_function.number_dofs_per_node))].reshape(-1,1))
+
+    @partial(jit)
+    def ComputeElementsStresses(total_control_vars:jnp.array,total_primal_vars:jnp.array):
+        # parallel calculation of energies
+        return jax.vmap(ComputeElementStressVmapCompatible,(0,None,None,None,None)) \
+                        (loss_function.fe_mesh.GetElementsIds(loss_function.element_type),
+                        loss_function.fe_mesh.GetElementsNodes(loss_function.element_type),
+                        loss_function.fe_mesh.GetNodesCoordinates(),
+                        total_control_vars,
+                        total_primal_vars)
+    @partial(jit)
+    def ComputeTotalStress(total_control_vars:jnp.array,total_primal_vars:jnp.array):
+        return ComputeElementsStresses(total_control_vars.reshape(-1,1),total_primal_vars)
+    
+
+    total_stress = ComputeTotalStress(jnp.array(total_control_vars),jnp.array(disp_field_vec))
+    num_nodes = loss_function.fe_mesh.GetNumberOfNodes()
+    nodal_stress = compute_nodal_values_from_gauss(total_stress, element_nodes, num_nodes)
+
+    return nodal_stress.flatten()

@@ -17,7 +17,7 @@ from fol.controls.dirichlet_control import DirichletControl
 import pickle
 
 # directory & save handling
-working_directory_name = 'nn_output_mechanical_3d_data_driven'
+working_directory_name = 'nn_output_mechanical_3d_data_driven'  # should be the same dir that contains network parameters
 case_dir = os.path.join('.', working_directory_name)
 # create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
@@ -37,7 +37,7 @@ mechanical_loss_3d = NeoHookeMechanicalLoss3DTetra("mechanical_loss_3d",loss_set
 mechanical_loss_3d.Initialize()
 
 
-# dirichlet control
+# # create dirichlet control to introduce the boundaries from which network learns
 dirichlet_control_settings = {"learning_boundary":{"Ux":{'right'},"Uy":{"right"}, "Uz":{"right"}}}
 dirichlet_control = DirichletControl(control_name='dirichlet_control',control_settings=dirichlet_control_settings, 
                                         fe_mesh= fe_mesh,fe_loss=mechanical_loss_3d)
@@ -59,10 +59,11 @@ for i in range(coeffs_matrix_test.shape[0]):
 K_matrix = np.array(K_mat)
 print(K_matrix.shape)
 
-# create identity control
+# define a control class which reconstrcut the input space from a reduced space
+# identity control maps X: -> X
 identity_control = IdentityControl("ident_control",control_settings={},num_vars=3*fe_mesh.GetNumberOfNodes())
 
-# create regression loss
+# create regression loss used in data driven training
 reg_loss = RegressionLoss("reg_loss",loss_settings={"nodal_unknows":["Ux","Uy","Uz"]},fe_mesh=fe_mesh)
 
 # initialize all 
@@ -96,21 +97,23 @@ main_loop_transform = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e
 latent_step_optimizer = optax.chain(optax.normalize_by_update_norm(),optax.adam(1e-5))
 
 # create data driven class of Meta Implicit Operator Learning
-fol = DataDrivenMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
+ifol = DataDrivenMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",control=identity_control,
                                             loss_function=reg_loss,
                                             flax_neural_network=hyper_network,
                                             main_loop_optax_optimizer=main_loop_transform,
                                             latent_step_size=1e-2,
                                             num_latent_iterations=3)
 
-fol.Initialize()
+ifol.Initialize()
 
 # load the best model
-fol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
+ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")
 
 for eval_id in range(coeffs_matrix_test.shape[0]):
-    U_iFOL = np.array(fol.Predict(K_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
+    # predict the result from ifol
+    U_iFOL = np.array(ifol.Predict(K_matrix[eval_id,:].reshape(-1,1).T)).reshape(-1)
     
+    # update the boundary condition values for each test case
     updated_bc = bc_dict.copy()
     updated_bc.update({"Ux":{"left":0.,"right":coeffs_matrix_test[eval_id,0]},
                         "Uy":{"left":0.,"right":coeffs_matrix_test[eval_id,1]},
@@ -128,6 +131,7 @@ for eval_id in range(coeffs_matrix_test.shape[0]):
     nonlin_fe_solver = FiniteElementNonLinearResidualBasedSolver("nonlin_fe_solver",mechanical_loss_3d_updated,fe_setting)
     nonlin_fe_solver.Initialize()
     try:
+        # solve the Newton-Raphson initialized by ifol in one load increment
         U_FEM = np.array(nonlin_fe_solver.Solve(np.ones(fe_mesh.GetNumberOfNodes()),U_iFOL.reshape(3*fe_mesh.GetNumberOfNodes())))
     except Exception as e:
         print(f"Error value: {e}")        
@@ -137,5 +141,5 @@ for eval_id in range(coeffs_matrix_test.shape[0]):
     fe_mesh[f'U_iFOL_{eval_id}'] = U_iFOL.reshape((fe_mesh.GetNumberOfNodes(), 3))
     fe_mesh[f'abs_err_{eval_id}'] = abs_err.reshape((fe_mesh.GetNumberOfNodes(), 3))
 
-
+# export the result in a .vtu/.vtk file
 fe_mesh.Finalize(export_dir=case_dir,export_format='vtu')

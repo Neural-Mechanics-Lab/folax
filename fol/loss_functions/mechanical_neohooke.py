@@ -254,7 +254,7 @@ class NeoHookeMechanicalLoss(FiniteElementLoss):
             mu_at_gauss = e_at_gauss / (2 * (1 + self.v))
 
             H,F,B = self.CalculateKinematics(DN_DX_T,uvwe)
-            xsi,S,C = self.material_model.evaluate(F,k_at_gauss,mu_at_gauss)
+            xsi,S,C = self.material_model.evaluate(F,k=k_at_gauss,mu=mu_at_gauss)
             gp_geo_stiffness = self.CalculateGeometricStiffness(DN_DX_T,S)
             
             

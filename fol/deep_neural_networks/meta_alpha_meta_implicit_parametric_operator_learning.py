@@ -128,8 +128,9 @@ class MetaAlphaMetaImplicitParametricOperatorLearning(ImplicitParametricOperator
     @print_with_timestamp_and_execution_time
     @partial(nnx.jit, static_argnums=(0,), donate_argnums=1)
     def Predict(self,batch_X:jnp.ndarray):
+        control_outputs = self.control.ComputeBatchControlledVariables(batch_X)
         preds = self.ComputeBatchPredictions(batch_X,(self.flax_neural_network,self.latent_step_nnx_model))
-        return self.loss_function.GetFullDofVector(batch_X,preds.reshape(preds.shape[0], -1))
+        return self.loss_function.GetFullDofVector(control_outputs,preds.reshape(preds.shape[0], -1))
 
     def SaveCheckPoint(self,check_point_type,checkpoint_state_dir):
         """

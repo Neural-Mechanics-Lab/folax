@@ -171,6 +171,9 @@ class Mesh(ABC):
     def GetNodeSet(self,set_name) -> jnp.array:
         return self.node_sets[set_name]
     
+    def HasPointData(self,data_name):
+        return data_name in self.mesh_io.point_data
+
     def __getitem__(self, key):
         return self.mesh_io.point_data[key]
     

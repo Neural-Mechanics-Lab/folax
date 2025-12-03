@@ -99,6 +99,9 @@ class FiniteElementLoss(Loss):
         else:
             self.full_dof_vector_function = ConstructFullDofVector
 
+        # set identity function for parametric learning
+        self.get_param_function = lambda x: x
+
         # element batching
         num_cuts = 20
         num_elements = self.fe_mesh.GetNumberOfElements(self.element_type)
@@ -120,6 +123,9 @@ class FiniteElementLoss(Loss):
 
     def GetFullDofVector(self,known_dofs: jnp.array,unknown_dofs: jnp.array) -> jnp.array:
         return self.full_dof_vector_function(known_dofs,unknown_dofs)
+    
+    def GetParametersVectors(self,param_vector: jnp.array) -> jnp.array:
+        return self.get_param_function(param_vector)
 
     def Finalize(self) -> None:
         pass
@@ -249,7 +255,7 @@ class FiniteElementLoss(Loss):
         BC_applied_batch_dofs = self.GetFullDofVector(batch_params,batch_dofs)
 
         def ComputeSingleLoss(params,dofs):
-            return jnp.sum(self.ComputeElementsEnergies(params,dofs))**self.loss_function_exponent
+            return jnp.sum(self.ComputeElementsEnergies(self.GetParametersVectors(params),dofs))**self.loss_function_exponent
 
         batch_energies = jax.vmap(ComputeSingleLoss)(batch_params,BC_applied_batch_dofs)
 

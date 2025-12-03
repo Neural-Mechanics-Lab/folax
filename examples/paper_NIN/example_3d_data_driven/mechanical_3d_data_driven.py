@@ -12,14 +12,60 @@ from data_driven_meta_implicit_parametric_operator_learning import DataDrivenMet
 from fol.tools.usefull_functions import *
 from fol.tools.logging_functions import Logger
 from fol.deep_neural_networks.nns import HyperNetwork,MLP
-# from fol.data_input_output.zarr_io import ZarrIO
 from fol.controls.dirichlet_control import DirichletControl
-import pickle
+from fol.tools.decoration_functions import *
+import requests
+import zipfile
+
+def prepare_net_params(case_dir):
+        """
+        Extract only the contents of 'folder_in_zip' from the ZIP archive
+        and place them into 'extract_to'.
+        """
+        extract_to = case_dir
+        folder_in_zip = "3d_hyperelastic_data_driven/"  # ensure correct format
+
+        url = "https://zenodo.org/records/17752752/files/NiN.zip?download=1"
+        filename = "NiN.zip"
+
+        fol_info(f"⬇ Downloading '{filename}' from Zenodo...")
+
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # raises if e.g. 404, 403, etc.
+
+        with open(filename, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:  # filter out keep-alive chunks
+                    f.write(chunk)
+
+        with zipfile.ZipFile(filename, "r") as z:
+            # Filter the files that start with the folder path
+            members = [m for m in z.namelist() if m.startswith(folder_in_zip)]
+
+            if not members:
+                raise ValueError(f"Folder '{folder_in_zip}' not found inside ZIP.")
+
+            fol_info(f"📦 Extracting {len(members)} files from '{folder_in_zip}'...")
+
+            for member in members:
+                # Compute final extraction path
+                destination = os.path.join(extract_to, os.path.relpath(member, folder_in_zip))
+
+                # Create directories if needed
+                if member.endswith("/"):
+                    os.makedirs(destination, exist_ok=True)
+                else:
+                    # Ensure parent directory exists
+                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    with z.open(member, "r") as src, open(destination, "wb") as dest:
+                        dest.write(src.read())
+
+            fol_info(f"✔ Extracted to: {os.path.abspath(extract_to)}")
 
 # directory & save handling
-working_directory_name = 'nn_output_mechanical_3d_data_driven'  # should be the same dir that contains network parameters
+working_directory_name = '3d_hyperelastic_data_driven'  # should be the same dir that contains network parameters
 case_dir = os.path.join('.', working_directory_name)
-# create_clean_directory(working_directory_name)
+create_clean_directory(working_directory_name)
 sys.stdout = Logger(os.path.join(case_dir,working_directory_name+".log"))
 
 #call the function to create the mesh
@@ -57,7 +103,7 @@ for i in range(coeffs_matrix_test.shape[0]):
     K_matrix_total[mechanical_loss_3d.dirichlet_indices]= K_matrix_dirichlet[i,:]
     K_mat.append(K_matrix_total)
 K_matrix = np.array(K_mat)
-print(K_matrix.shape)
+
 
 # define a control class which reconstrcut the input space from a reduced space
 # identity control maps X: -> X
@@ -105,6 +151,9 @@ ifol = DataDrivenMetaImplicitParametricOperatorLearning(name="meta_implicit_ol",
                                             num_latent_iterations=3)
 
 ifol.Initialize()
+
+# download the params if needed
+prepare_net_params(case_dir)
 
 # load the best model
 ifol.RestoreState(restore_state_directory=case_dir+"/flax_train_state")

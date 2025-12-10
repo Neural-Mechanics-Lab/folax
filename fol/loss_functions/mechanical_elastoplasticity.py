@@ -12,22 +12,27 @@ from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
 from fol.mesh_input_output.mesh import Mesh
+from fol.constitutive_material_models.plasticity import J2Plasticity 
 
 class ElastoplasticityLoss(MechanicalLoss):
 
     def Initialize(self) -> None:  
 
         super().Initialize() 
+        mat_dict = self.loss_settings["material_dict"]
 
-        if self.dim == 2:
-            self.material_model = ElastoplasticityModel2D()
-        else:
-            fol_error("3D Elastoplasticity analysis is not supported yet !")
+        self.material_model = J2Plasticity(
+            E=mat_dict["young_modulus"],
+            nu=mat_dict["poisson_ratio"],
+            yield_stress=mat_dict["yield_limit"],
+            hardening_modulus=mat_dict["iso_hardening_parameter_1"],
+            hardening_exponent=mat_dict["iso_hardening_param_2"] # Use .get() for safety
+        )
 
     @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,uvwe,element_state_gps):
         @jit
-        def compute_at_gauss_point(gp_point,gp_weight,gp_state_vector):
+        def compute_at_gauss_point(gp_point,gp_weight,gp_state_vector,uvwe):
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
             N_mat = self.CalculateNMatrix(N_vec)
             DN_DX = self.fe_element.ShapeFunctionsGlobalGradients(xyze,gp_point)
@@ -35,26 +40,58 @@ class ElastoplasticityLoss(MechanicalLoss):
             J = self.fe_element.Jacobian(xyze,gp_point)
             detJ = jnp.linalg.det(J)
             strain_gp = B_mat @ uvwe
-            strain_matrix = jnp.array([
-                [strain_gp[0], strain_gp[2]],  # [ε_xx, ε_xy]
-                [strain_gp[2], strain_gp[1]]   # [ε_xy, ε_yy]
-            ])
-            strain_matrix_2x2= strain_matrix.squeeze()
-            tgMM,stress_gp_v,gp_state_up = self.material_model.evaluate(self.loss_settings["material_dict"]["young_modulus"],self.loss_settings["material_dict"]["poisson_ratio"],self.loss_settings["material_dict"]["iso_hardening_parameter_1"],self.loss_settings["material_dict"]["iso_hardening_param_2"],self.loss_settings["material_dict"]["yield_limit"], strain_matrix_2x2, gp_state_vector)
-            stress_gp_v = stress_gp_v.reshape(3,1)
-            gp_stiffness = gp_weight * detJ * (B_mat.T @ (tgMM @ B_mat))
+            # Determine dimensionality based on strain vector length
+            n_strain_components = strain_gp.shape[0]
+            
+            # Construct strain matrix based on dimensionality
+            if n_strain_components == 3:  # 2D case (ε_xx, ε_yy, γ_xy)
+                strain_matrix = jnp.array([
+                    [strain_gp[0], strain_gp[2]],  # [ε_xx, ε_xy]
+                    [strain_gp[2], strain_gp[1]]   # [ε_xy, ε_yy]
+                ])
+            elif n_strain_components == 6:  # 3D case (ε_xx, ε_yy, ε_zz, γ_xy, γ_yz, γ_xz)
+                strain_matrix = jnp.array([
+                    [strain_gp[0], strain_gp[3], strain_gp[5]],  # [ε_xx, ε_xy, ε_xz]
+                    [strain_gp[3], strain_gp[1], strain_gp[4]],  # [ε_xy, ε_yy, ε_yz]
+                    [strain_gp[5], strain_gp[4], strain_gp[2]]   # [ε_xz, ε_yz, ε_zz]
+                ])
+            strain_matrix_array= strain_matrix.squeeze()
+            stress_gp_v,gp_state_up = self.material_model.evaluate(strain_matrix_array, gp_state_vector)
+            stress_gp_v = stress_gp_v.reshape(n_strain_components,1)
             gp_f_int = (gp_weight * detJ * (B_mat.T @ stress_gp_v))
+            #gp_stiffness = gp_weight * detJ * (B_mat.T @ (tgMM @ B_mat)) use when computing tangent at gauss point level
             gp_f_body = (gp_weight * detJ * (N_mat.T @ self.body_force))
             
-            return gp_stiffness,gp_f_body,gp_f_int,gp_state_up
+            return gp_f_body,gp_f_int,gp_state_up
 
         gp_points,gp_weights = self.fe_element.GetIntegrationData()
 
-        k_gps,f_gps,f_gps_int,gps_state = jax.vmap(compute_at_gauss_point,in_axes=(0,0,0))(gp_points,gp_weights,element_state_gps)
-        Se = jnp.sum(k_gps, axis=0, keepdims=False)
+        f_gps,f_gps_int,gps_state = jax.vmap(compute_at_gauss_point,in_axes=(0,0,0,None))(gp_points,gp_weights,element_state_gps,uvwe)
+        #Se = jnp.sum(k_gps, axis=0, keepdims=False) use when computing tangent at gauss point level
         Fe = jnp.sum(f_gps, axis=0, keepdims=False)
         Fe_int= jnp.sum(f_gps_int, axis=0)
         residual = (Fe_int-Fe)
+        
+        #Compute element tangent 
+        def compute_residual_flat(u_flat):
+            u = u_flat.reshape(-1, 1)  # Reshape back to column vector
+            f_gps, f_gps_int, _ = jax.vmap(
+                compute_at_gauss_point, 
+                in_axes=(0, 0, 0, None)
+            )(gp_points, gp_weights, element_state_gps, u)
+            
+            Fe = jnp.sum(f_gps, axis=0, keepdims=False)
+            Fe_int = jnp.sum(f_gps_int, axis=0)
+            residual = (Fe_int - Fe)
+            return residual.flatten()  # Return as 1D array
+        
+        # Compute residual
+        uvwe_flat = uvwe.flatten()
+        residual_flat = compute_residual_flat(uvwe_flat)
+        residual = residual_flat.reshape(-1, 1)
+        
+        # Compute tangent stiffness using automatic differentiation
+        Se = jax.jacfwd(compute_residual_flat)(uvwe_flat)
         element_residuals = jax.lax.stop_gradient(residual)
         return  ((uvwe.T @ element_residuals)[0,0]),gps_state, residual, Se
     
@@ -206,3 +243,9 @@ class ElastoplasticityLoss2DQuad(ElastoplasticityLoss):
         super().__init__(name,{**loss_settings,"compute_dims":2,
                                "ordered_dofs": ["Ux","Uy"],  
                                "element_type":"quad"},fe_mesh)
+
+class ElastoplasticityLoss3DTetra(ElastoplasticityLoss):
+    def __init__(self, name: str, loss_settings: dict, fe_mesh: Mesh):
+        super().__init__(name,{**loss_settings,"compute_dims":3,
+                               "ordered_dofs": ["Ux","Uy","Uz"],  
+                               "element_type":"tetra"},fe_mesh)

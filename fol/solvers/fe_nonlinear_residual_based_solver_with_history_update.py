@@ -79,7 +79,10 @@ class FiniteElementNonLinearResidualBasedSolverWithStateUpdate(FiniteElementNonL
         nelem = self.fe_loss_function.fe_mesh.GetNumberOfElements(self.fe_loss_function.element_type)
         ngp   = self.fe_loss_function.fe_element.GetIntegrationData()[0].shape[0]
         if current_state is None:
-            current_state = jnp.zeros((nelem, ngp, 4)) 
+            if self.fe_loss_function.element_type=="quad":
+                current_state = jnp.zeros((nelem, ngp, 4))
+            else:
+                current_state = jnp.zeros((nelem, ngp, 7))
         else:
             current_state = jnp.asarray(current_state)
 

@@ -22,18 +22,6 @@ class BaseConstitutiveModel(ABC):
         pass
     
 
-class HyperelasticModel(BaseConstitutiveModel):
-    """Base for hyperelastic materials (no history)"""
-    
-    @abstractmethod
-    def evaluate(self, F: Array, *params) -> Tuple[float, Array, Array]:
-        """
-        Returns:
-            energy: Strain energy density
-            stress: Stress tensor (PK2 or Cauchy)
-            tangent: Material tangent
-        """
-        pass
 
 
 class PlasticityModel(BaseConstitutiveModel):

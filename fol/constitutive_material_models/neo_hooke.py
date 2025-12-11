@@ -2,14 +2,14 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from functools import partial
-from .base import HyperelasticModel
+from .base import BaseConstitutiveModel
 from .utils import TensorOperations as TO
 from .utils import TensorVoigtArray as TVA
 
 
 
 # -----------------------------------------
-class NeoHookianModel2D(HyperelasticModel):
+class NeoHookianModel2D(BaseConstitutiveModel):
     """
     Material model.
     """
@@ -60,7 +60,7 @@ class NeoHookianModel2D(HyperelasticModel):
         C_tangent = TVA.FourthTensorToVoigt(C_tangent_fourth)
         return xsie, Se_voigt, C_tangent
     
-class NeoHookianModel(HyperelasticModel):
+class NeoHookianModel(BaseConstitutiveModel):
     """
     Material model.
     """
@@ -113,7 +113,7 @@ class NeoHookianModel(HyperelasticModel):
         return xsie, Se_voigt, C_tangent
         
     
-class NeoHookianModelAD(HyperelasticModel):
+class NeoHookianModelAD(BaseConstitutiveModel):
     """
     Material model.
     """
@@ -161,7 +161,7 @@ class NeoHookianModelAD(HyperelasticModel):
 
         return xsie, Se_voigt, C_tangent.squeeze()
     
-class NeoHookianModel2DAD(HyperelasticModel):
+class NeoHookianModel2DAD(BaseConstitutiveModel):
     """
     Material model.
     """

@@ -29,9 +29,7 @@ class ElastoplasticityLoss(MechanicalLoss):
             hardening_exponent=mat_dict["iso_hardening_param_2"] # Use .get() for safety
         )
 
-    @partial(jit, static_argnums=(0,))
     def ComputeElement(self,xyze,de,uvwe,element_state_gps):
-        @jit
         def compute_at_gauss_point(gp_point,gp_weight,gp_state_vector,uvwe):
             N_vec = self.fe_element.ShapeFunctionsValues(gp_point)
             N_mat = self.CalculateNMatrix(N_vec)

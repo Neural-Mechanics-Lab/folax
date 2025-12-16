@@ -1,7 +1,5 @@
 import jax
 import jax.numpy as jnp
-from jax import jit
-from functools import partial
 from .base import BaseConstitutiveModel
 from .utils import TensorOperations as TO
 from .utils import TensorVoigtArray as TVA
@@ -13,7 +11,6 @@ class NeoHookianModel2D(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
     def evaluate(self, F, k, mu):
         """
         Evaluate the stress and tangent operator at given local coordinates.
@@ -64,7 +61,6 @@ class NeoHookianModel(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
     def evaluate(self, F, k, mu):
         """
         Evaluate the stress and tangent operator at given local coordinates.
@@ -117,7 +113,6 @@ class NeoHookianModelAD(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
     def evaluate(self, C_mat, k, mu, lambda_, *args, **keyargs):
         """
         Evaluate the stress and tangent operator at given local coordinates.
@@ -165,7 +160,6 @@ class NeoHookianModel2DAD(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
     def evaluate(self, C_mat, k, mu, lambda_, *args, **keyargs):
         """
         Evaluate the stress and tangent operator at given local coordinates.

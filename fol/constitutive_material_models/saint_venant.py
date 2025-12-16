@@ -1,7 +1,5 @@
 import jax
 import jax.numpy as jnp
-from functools import partial
-from jax import jit
 from .base import BaseConstitutiveModel
 from .utils import TensorVoigtArray as TVA
 from .utils import TensorOperations as TO
@@ -10,8 +8,7 @@ class SaintVenant(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
-    def evaluate(self, F, lambda_, mu, *args, **keyargs):
+    def evaluate(self, F, lambda_, mu):
         """
         Evaluate the stress and tangent operator at given local coordinates.
         This method should be overridden by subclasses.
@@ -38,8 +35,7 @@ class SaintVenantAD(BaseConstitutiveModel):
     """
     Material model.
     """
-    @partial(jit, static_argnums=(0,))
-    def evaluate(self, E_mat, lambda_, mu, *args, **keyargs):
+    def evaluate(self, E_mat, lambda_, mu):
         """
         Evaluate the stress and tangent operator at given local coordinates.
         This method should be overridden by subclasses.

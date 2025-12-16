@@ -1,21 +1,36 @@
 """
-J2 (von Mises) plasticity with isotropic hardening.
-
-Implements return mapping algorithm for small-strain plasticity.
+ Authors: Rishabh Arora, https://github.com/rishabharora236-cell
+ Date: Dec, 2025
+ License: FOL/LICENSE
 """
 import jax
 import jax.numpy as jnp
 from jax import Array
-from functools import partial
 from typing import Tuple
 
-from .base import PlasticityModel
+from .base import BaseConstitutiveModel
 from .utils import TensorVoigtArray as TVA
 from .utils import TensorOperations as TO
-from .solvers import NewtonSolver
-
+from .utils import NewtonSolver
+from abc import abstractmethod
 
 # -----------------------------------------
+class PlasticityModel(BaseConstitutiveModel):
+    """Base for plasticity models (with history)"""
+    
+    def evaluate(self, strain: Array, state: Array) -> Tuple[Array, Array, Array]:
+        """
+        Returns:
+            stress: Cauchy stress
+            new_state: Updated state vector
+        """
+        pass
+    
+    @abstractmethod
+    def initial_state(self, dim: int = 3) -> Array:
+        """Must return initial state vector"""
+        pass
+
 def plane_strain_embedding(tensor_2d: Array, zz_component: float = 0.0) -> Array:
         """
         Embed 2D tensor into 3D assuming plane strain.
@@ -58,8 +73,15 @@ def isotropic_3d(E: float, nu: float) -> Tuple[float, float, callable]:
 
 class J2Plasticity(PlasticityModel):
     """
+    Rezaei, S., Moeineddin, A., & Harandi, A. (2024). 
+    Learning solutions of thermodynamics-based nonlinear constitutive material models using physics-informed neural networks.       
+    Computational Mechanics, 74(2), 1-34.
+
+
     J2 (von Mises) plasticity with nonlinear isotropic hardening.
-    
+    Implements return mapping algorithm for small-strain plasticity.
+
+
     Yield function: f = σ_eq - (σ_y0 + H(ξ))
     Hardening law: H(ξ) = h1 * (1 - exp(-h2 * ξ))
     
@@ -111,7 +133,6 @@ class J2Plasticity(PlasticityModel):
         """Evaluate hardening law"""
         return self.y0 + self.h1 * (1.0 - jnp.exp(-self.h2 * xi))
     
-    @partial(jax.jit, static_argnums=(0,))
     def evaluate(self,
                  strain: Array,
                  state: Array) -> Tuple[Array, Array]:

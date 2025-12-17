@@ -13,6 +13,7 @@ from jax import jit,lax
 import jax
 from functools import partial
 import jax
+import jax
 
 class ConstantsMeta(type):
     def __setattr__(self, key, value):

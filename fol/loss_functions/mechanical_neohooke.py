@@ -11,6 +11,7 @@ from functools import partial
 from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
 from fol.mesh_input_output.mesh import Mesh
+from fol.constitutive_material_models.neo_hooke import NeoHookianModel2D,NeoHookianModel
 
 class NeoHookeMechanicalLoss(FiniteElementLoss):
 

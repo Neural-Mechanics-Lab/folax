@@ -464,30 +464,133 @@ class Plotter3D:
 
 
 # ----------------------------------------------------------------------
-# Utility: solver convergence plot (kept as-is)
+# PLotter2D for plotting 2D domains(most of the configs are transfered)
 # ----------------------------------------------------------------------
 
-def plot_solver_convergence(residual_norms_history, save_path=None, show=False):
+class Plotter2D(Plotter3D):
     """
-    Plots the nonlinear solver residual norm vs. iteration for each sample.
+    Flat-mesh visualiser re-using Plotter3D’s config.
 
-    Args:
-        residual_norms_history: List of lists, each containing the residual norms for a sample.
-        save_path: If given, the plot is saved to this path.
-        show: If True, the plot is displayed.
+    • Keeps the 3-panel overview (FOL |U|, REF |U|, |ΔU|).
+    • Optional in-plane warping for the first two panels via
+          config["warp_factor_2d"]  (float, default 0 = off).
     """
-    plt.figure(figsize=(8, 6))
-    for idx, residual_norms in enumerate(residual_norms_history):
-        plt.semilogy(residual_norms, '-o', label=f"Sample {idx}")
-    plt.xlabel("Iteration number", fontsize=12)
-    plt.ylabel("Residual norm (log scale)", fontsize=12)
-    plt.title("Nonlinear Solver Convergence (Neo-Hookean)", fontsize=14)
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=300)
-        print(f"Convergence plot saved to: {save_path}")
-    if show:
-        plt.show()
-    plt.close()
+# ----------------------------------------------------------------------
+# Initialization
+# ----------------------------------------------------------------------
+    def __init__(self, vtk_path: str, *, config: dict):
+        super().__init__(vtk_path=vtk_path, warp_factor=1.0, config=config)
+
+        # ensure mesh is flat in Z
+        if abs(self.mesh.bounds[-1] - self.mesh.bounds[-2]) > 1e-8:
+            raise ValueError("Plotter2D expects a flat 2-D mesh (z ≈ 0).")
+
+        self.do_clip = False
+        self.warp_factor_2d = float(self.config.get("warp_factor_2d", 0.0)) or None
+
+        self.u_fol_pre = self.name_map["u_fol_prefix"]
+        self.u_ref_pre = self.name_map["u_fe_prefix"]
+        self._find_best_sample_by_abs_error()     # sets self.fields / self.best_id
+# ----------------------------------------------------------------------
+# Helpers: 
+# ----------------------------------------------------------------------
+    def _ensure_mag(self, vec_name: str) -> str:
+        """Create <vec>_mag on-the-fly (2- or 3-component arrays)."""
+        if vec_name.endswith("_mag"):
+            return vec_name
+        arr = self.mesh[vec_name]
+        if arr.ndim == 2 and arr.shape[1] in (2, 3):
+            mag = f"{vec_name}_mag"
+            if mag not in self.mesh.point_data:
+                self.mesh.point_data[mag] = np.linalg.norm(arr, axis=1)
+            return mag
+        return vec_name
+
+    def _find_best_sample_by_abs_error(self):
+        # add magnitude fields for every abs_error_i vector
+        for k in list(self.mesh.point_data.keys()):
+            if re.match(r"abs_error_(\d+)$", k):
+                self._ensure_mag(k)
+
+        ids = [int(m.group(1)) for k in self.mesh.point_data
+               if (m := re.match(r"abs_error_(\d+)_mag$", k))]
+        if not ids:
+            raise ValueError("No abs_error_<i>_mag fields in the VTK.")
+
+        best_id, min_err = None, float("inf")
+        for i in ids:
+            l2 = np.linalg.norm(self.mesh[f"abs_error_{i}_mag"])
+            if l2 < min_err:
+                best_id, min_err = i, l2
+
+        self.best_id = best_id
+        self.fields  = {
+            "U_FOL": f"{self.u_fol_pre}{best_id}",
+            "U_REF": f"{self.u_ref_pre}{best_id}",
+            "ERR":   f"abs_error_{best_id}_mag",
+        }
+        print(f"[Plotter2D] eval_id={best_id}  ‖error‖₂={min_err:.3e}")
+
+# ----------------------------------------------------------------------
+# Helper: rederer 
+# ----------------------------------------------------------------------
+    def render_panel(self, mesh_obj, field, clim, title, fname, show_edges=None):
+        if show_edges is None:
+            show_edges = self.show_edges_default
+        p = pv.Plotter(off_screen=True, window_size=self.config["window_size"])
+        p.add_mesh(mesh_obj, scalars=field, cmap=self.config["cmap"],
+                   clim=clim, show_edges=show_edges, edge_color="white",
+                   line_width=0.4, scalar_bar_args=self.shared_scalar_bar_args)
+        p.view_xy();  p.enable_parallel_projection()
+        p.camera.zoom(float(self.config["zoom"]))
+        p.show_axes = False
+        if title:
+            p.add_text(title, font_size=self.config["title_font_size"],
+                       position="upper_edge")
+        out = os.path.join(self.output_dir, fname)
+        p.screenshot(out); p.close()
+        print(f"[Plotter2D] saved {fname}")
+
+    # helper to create a warped copy --------------------------------
+    def _warped_mesh(self, vec_field: str, mag_field: str):
+        m = self.mesh.copy(deep=True)
+        m.active_vectors_name = vec_field
+        w = m.warp_by_vector(factor=self.warp_factor_2d)
+        w[mag_field] = self.mesh[mag_field]      # colour by |U|
+        return w
+# ----------------------------------------------------------------------
+# Render all panels here
+# ----------------------------------------------------------------------
+    def render_all_panels(self):
+        fol_vec, ref_vec, err_sca = (self.fields[k] for k in ("U_FOL", "U_REF", "ERR"))
+        fol_mag, ref_mag = map(self._ensure_mag, (fol_vec, ref_vec))
+
+        # use warped meshes if requested
+        mesh_fol = self._warped_mesh(fol_vec, fol_mag) if self.warp_factor_2d else self.mesh
+        mesh_ref = self._warped_mesh(ref_vec, ref_mag) if self.warp_factor_2d else self.mesh
+
+        clim_u = [0.0, float(max(self.mesh[fol_mag].max(), self.mesh[ref_mag].max()))]
+        clim_e = [0.0, float(self.mesh[err_sca].max())]
+
+        panels = [
+            (mesh_fol, fol_mag, clim_u, "FOL |U|",  "panel_fol.png"),
+            (mesh_ref, ref_mag, clim_u, "REF |U|",  "panel_ref.png"),
+            (self.mesh, err_sca, clim_e, "Abs Error |ΔU|",    "panel_err.png"),
+        ]
+
+        for m, f, c, t, fn in panels:
+            self.render_panel(m, f, c, t, fn)
+
+        # stitch
+        import matplotlib.image as mpimg
+        fig, ax = plt.subplots(1, 3, figsize=(18, 6))
+        for a, (_, _, _, _, fn) in zip(ax, panels):
+            a.imshow(mpimg.imread(os.path.join(self.output_dir, fn)));  a.axis("off")
+        out = os.path.join(self.output_dir,
+                           self.config.get("output_image", "overview2d.png"))
+        plt.tight_layout();  plt.savefig(out, dpi=300);  plt.close(fig)
+        print(f"[Plotter2D] overview saved → {out}")
+
+
+
+

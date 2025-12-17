@@ -13,6 +13,7 @@ from fol.tools.fem_utilities import *
 from fol.tools.decoration_functions import *
 from fol.mesh_input_output.mesh import Mesh
 from fol.tools.usefull_functions import *
+from fol.constitutive_material_models.saint_venant import SaintVenantAD
 
 class SaintVenantMechanicalLoss(FiniteElementLoss):
 

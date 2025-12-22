@@ -210,6 +210,77 @@ def create_3D_box_mesh(Nx,Ny,Nz,Lx,Ly,Lz,case_dir):
 
     return fe_mesh
 
+def create_3D_box_mesh_structured(Nx, Ny, Nz, Lx, Ly, Lz):
+
+    xs = jnp.linspace(0.0, Lx, Nx)  
+    ys = jnp.linspace(0.0, Ly, Ny)  
+    zs = jnp.linspace(0.0, Lz, Nz)  
+
+    X, Y, Z = jnp.meshgrid(xs, ys, zs, indexing="ij")  
+
+    nodes_coordinates = jnp.stack([X, Y, Z], axis=-1).reshape(-1, 3)
+    num_nodes = nodes_coordinates.shape[0]
+
+    node_ids = jnp.arange(num_nodes, dtype=jnp.int32)
+
+    def node_idx(i, j, k):
+        return i * Ny * Nz + j * Nz + k
+
+    hex_elems = []
+    for i in range(Nx - 1):
+        for j in range(Ny - 1):
+            for k in range(Nz - 1):
+                n000 = node_idx(i,   j,   k)
+                n100 = node_idx(i+1, j,   k)
+                n110 = node_idx(i+1, j+1, k)
+                n010 = node_idx(i,   j+1, k)
+                n001 = node_idx(i,   j,   k+1)
+                n101 = node_idx(i+1, j,   k+1)
+                n111 = node_idx(i+1, j+1, k+1)
+                n011 = node_idx(i,   j+1, k+1)
+
+                hex_elems.append([n000, n100, n110, n010,
+                                  n001, n101, n111, n011])
+
+    hex_elems = jnp.array(hex_elems, dtype=jnp.int32)
+    elements_nodes = {"hexahedron": hex_elems}
+
+    x = nodes_coordinates[:, 0]
+    y = nodes_coordinates[:, 1]
+    z = nodes_coordinates[:, 2]
+
+    atol = 1e-8
+    left_boundary_node_ids   = jnp.where(jnp.isclose(x, 0.0, atol=atol),  size=None)[0]
+    right_boundary_node_ids  = jnp.where(jnp.isclose(x, Lx,  atol=atol), size=None)[0]
+    bottom_boundary_node_ids = jnp.where(jnp.isclose(y, 0.0, atol=atol),  size=None)[0]
+    top_boundary_node_ids    = jnp.where(jnp.isclose(y, Ly,  atol=atol), size=None)[0]
+    front_boundary_node_ids  = jnp.where(jnp.isclose(z, 0.0, atol=atol),  size=None)[0]
+    back_boundary_node_ids   = jnp.where(jnp.isclose(z, Lz,  atol=atol), size=None)[0]
+
+    node_sets = {
+        "left":   left_boundary_node_ids,
+        "right":  right_boundary_node_ids,
+        "bottom": bottom_boundary_node_ids,
+        "top":    top_boundary_node_ids,
+        "front":  front_boundary_node_ids,
+        "back":   back_boundary_node_ids,
+    }
+
+    fe_mesh = Mesh("box_io", "box.")  
+
+    fe_mesh.node_ids = node_ids
+    fe_mesh.nodes_coordinates = nodes_coordinates
+    fe_mesh.elements_nodes = elements_nodes
+    fe_mesh.node_sets = node_sets
+
+    fe_mesh.mesh_io = meshio.Mesh(
+        points=np.asarray(nodes_coordinates),
+        cells={"hexahedron": np.asarray(hex_elems, dtype=np.int64)}
+    )
+
+    fe_mesh.is_initialized = True
+    return fe_mesh
+
 def create_2D_square_mesh(L,N):
 
     # create empty fe mesh object

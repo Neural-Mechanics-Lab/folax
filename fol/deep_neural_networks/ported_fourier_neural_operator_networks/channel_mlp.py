@@ -156,8 +156,7 @@ class ChannelMLP(nnx.Module):
         ), f"Expected last dim (channels) = {self.in_channels}, got {C_in}"
 
         # Flatten spatial dims: (B, d1, ..., dn, C) -> (B, L, C)
-        L = int(jnp.prod(jnp.array(spatial_dims))) if spatial_dims else 1
-        x = x.reshape((B, L, C_in))
+        x = x.reshape((B, -1, C_in))
 
         # Apply MLP across the last dimension (C), broadcasting over (B, L)
         for i, fc in enumerate(self.fcs):

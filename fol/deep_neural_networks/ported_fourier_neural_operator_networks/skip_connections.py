@@ -203,8 +203,7 @@ class Flattened1dConv(nnx.Module):
 
         # To faithfully mimic the PyTorch behavior where they reshape
         # back to *size[2:], we require L_out == L.
-        spatial_size = int(jnp.prod(jnp.array(spatial)))
-        assert y_flat.shape[1] == spatial_size, (
+        assert y_flat.shape[1] == x_flat.shape[1], (
             "Flattened length changed by Conv1d; to preserve original spatial shape, "
             "use kernel_size=1 (and stride=1, padding='VALID')."
         )

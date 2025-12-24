@@ -13,8 +13,13 @@ from flax import nnx
 SkipType = Literal["soft-gating", "linear", "identity"]
 
 # JAX/Flax NNX implementation of skip_connections.
+#
 # Ported from the original PyTorch implementation:
-# https://github.com/neuraloperator/neuraloperator/blob/main/neuralop/layers/skip_connections.py
+#   Repository: https://github.com/neuraloperator/neuraloperator
+#   File: neuralop/layers/skip_connections.py
+#   Commit: 14c0f7320dc7c94e907a16fd276248df2d71407c (2025-11-14)
+#   URL:
+#     https://github.com/neuraloperator/neuraloperator/blob/14c0f7320dc7c94e907a16fd276248df2d71407c/neuralop/layers/skip_connections.py
 #
 # Original code copyright (c) 2023 NeuralOperator developers
 # Licensed under the MIT License.
@@ -22,11 +27,7 @@ SkipType = Literal["soft-gating", "linear", "identity"]
 # Note:
 #   The PyTorch implementation operates in NCHW (channels-first) format,
 #   while JAX/Flax NNX uses NHWC (channels-last). This port includes
-#   careful transformations between channel orders to preserve the
-#   original module's behavior while conforming to Flax/JAX conventions.
-#
-# This file contains a reimplementation and may include modifications
-# as required by the channel-layout differences.
+#   careful transformations between channel orders to preserve behavior.
 
 def skip_connection(
     in_features: int,

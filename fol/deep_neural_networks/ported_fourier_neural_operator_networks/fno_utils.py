@@ -9,8 +9,13 @@ from typing import List, Optional, Union
 Number = Union[float, int]
 
 # JAX/Flax NNX implementation of fno_utils.
+#
 # Ported from the original PyTorch implementation:
-# https://github.com/neuraloperator/neuraloperator/blob/main/neuralop/utils.py
+#   Repository: https://github.com/neuraloperator/neuraloperator
+#   File: neuralop/utils.py
+#   Commit: 14c0f7320dc7c94e907a16fd276248df2d71407c (2025-11-14)
+#   URL:
+#     https://github.com/neuraloperator/neuraloperator/blob/14c0f7320dc7c94e907a16fd276248df2d71407c/neuralop/utils.py
 #
 # Original code copyright (c) 2023 NeuralOperator developers
 # Licensed under the MIT License.
@@ -18,11 +23,7 @@ Number = Union[float, int]
 # Note:
 #   The PyTorch implementation operates in NCHW (channels-first) format,
 #   while JAX/Flax NNX uses NHWC (channels-last). This port includes
-#   careful transformations between channel orders to preserve the
-#   original module's behavior while conforming to Flax/JAX conventions.
-#
-# This file contains a reimplementation and may include modifications
-# as required by the channel-layout differences.
+#   careful transformations between channel orders to preserve behavior.
 
 def validate_scaling_factor(
     scaling_factor: Union[None, Number, List[Number], List[List[Number]]],

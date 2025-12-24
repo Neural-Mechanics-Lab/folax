@@ -13,8 +13,13 @@ import jax.numpy as jnp
 from flax import nnx
 
 # JAX/Flax NNX implementation of ChannelMLP.
+#
 # Ported from the original PyTorch implementation:
-# https://github.com/neuraloperator/neuraloperator/blob/main/neuralop/layers/channel_mlp.py
+#   Repository: https://github.com/neuraloperator/neuraloperator
+#   File: neuralop/layers/channel_mlp.py
+#   Commit: 14c0f7320dc7c94e907a16fd276248df2d71407c (2025-11-14)
+#   URL:
+#     https://github.com/neuraloperator/neuraloperator/blob/14c0f7320dc7c94e907a16fd276248df2d71407c/neuralop/layers/channel_mlp.py
 #
 # Original code copyright (c) 2023 NeuralOperator developers
 # Licensed under the MIT License.
@@ -22,11 +27,7 @@ from flax import nnx
 # Note:
 #   The PyTorch implementation operates in NCHW (channels-first) format,
 #   while JAX/Flax NNX uses NHWC (channels-last). This port includes
-#   careful transformations between channel orders to preserve the
-#   original module's behavior while conforming to Flax/JAX conventions.
-#
-# This file contains a reimplementation and may include modifications
-# as required by the channel-layout differences.
+#   careful transformations between channel orders to preserve behavior.
 
 
 class ChannelMLP(nnx.Module):
@@ -172,21 +173,32 @@ class ChannelMLP(nnx.Module):
 
 class LinearChannelMLP(nnx.Module):
     """
-    Multi-layer perceptron using fully connected layers for channel processing.
+    Multi-layer perceptron (MLP) for channel processing using fully connected layers.
 
-    This is an alternative implementation of ChannelMLP that uses standard Linear
-    layers instead of 1D convolutions.
+    This is a Flax NNX port of the corresponding PyTorch implementation. It is an
+    alternative to a convolution-based ChannelMLP, using standard Linear layers.
+
+    The network is defined by `layers = [in_channels, hidden1, ..., out_channels]`
+    and applies:
+      - a Linear transformation at every layer,
+      - `non_linearity` after every layer except the last,
+      - Dropout after every Linear layer *including the last* (to match the PyTorch code)
+        when `dropout > 0`.
 
     Parameters
     ----------
-    layers : list of int
-        List defining the architecture: [in_channels, hidden1, hidden2, ..., out_channels]
-        Must have at least 2 elements (input and output channels)
-    non_linearity : callable, optional
-        Nonlinear activation function to apply between layers, by default F.gelu
+    layers : Sequence[int]
+        Architecture definition: [in_channels, hidden1, ..., out_channels].
+        Must have at least 2 elements (input and output sizes).
+    non_linearity : Callable[[jnp.ndarray], jnp.ndarray], optional
+        Activation function applied after each Linear layer except the last.
+        Defaults to `jax.nn.gelu`.
     dropout : float, optional
-        Dropout probability applied after each layer (except the last).
-        If 0, no dropout is applied, by default 0.0
+        Dropout probability. If > 0, dropout is applied after each Linear layer
+        (including the last) to match the PyTorch implementation. If 0, no dropout
+        is applied. Defaults to 0.0.
+    rngs : nnx.Rngs
+        Random number generators used for parameter initialization and dropout.
     """
 
     def __init__(
@@ -228,17 +240,24 @@ class LinearChannelMLP(nnx.Module):
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         """
-        Forward pass through the linear channel MLP.
+        Apply the linear channel MLP.
+
+        The input is assumed to be a 2D array where the last dimension corresponds
+        to channels/features. This method preserves the leading dimension(s) by
+        applying per-row Linear transformations.
+
+        Dropout (if enabled) is applied after each Linear layer, including the last,
+        matching the behavior of the original PyTorch implementation.
 
         Parameters
         ----------
         x : jnp.ndarray
-            Input of shape (batch, in_channels) or (batch*spatial, in_channels)
+            Input array of shape (batch, in_channels) or (batch * spatial, in_channels).
 
         Returns
         -------
         jnp.ndarray
-            Output of shape (batch, out_channels) or (batch*spatial, out_channels)
+            Output array of shape (batch, out_channels) or (batch * spatial, out_channels).
         """
         for i, fc in enumerate(self.fcs):
             x = fc(x)  # Linear transformation

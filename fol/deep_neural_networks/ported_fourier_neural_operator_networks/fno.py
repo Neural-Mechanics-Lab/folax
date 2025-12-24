@@ -23,8 +23,13 @@ from .fno_block import FNOBlocks
 from .channel_mlp import ChannelMLP
 
 # JAX/Flax NNX implementation of FNO.
+#
 # Ported from the original PyTorch implementation:
-# https://github.com/neuraloperator/neuraloperator/blob/main/neuralop/models/fno.py
+#   Repository: https://github.com/neuraloperator/neuraloperator
+#   File: neuralop/models/fno.py
+#   Commit: 14c0f7320dc7c94e907a16fd276248df2d71407c (2025-11-14)
+#   URL:
+#     https://github.com/neuraloperator/neuraloperator/blob/14c0f7320dc7c94e907a16fd276248df2d71407c/neuralop/models/fno.py
 #
 # Original code copyright (c) 2023 NeuralOperator developers
 # Licensed under the MIT License.
@@ -32,11 +37,7 @@ from .channel_mlp import ChannelMLP
 # Note:
 #   The PyTorch implementation operates in NCHW (channels-first) format,
 #   while JAX/Flax NNX uses NHWC (channels-last). This port includes
-#   careful transformations between channel orders to preserve the
-#   original module's behavior while conforming to Flax/JAX conventions.
-#
-# This file contains a reimplementation and may include modifications
-# as required by the channel-layout differences.
+#   careful transformations between channel orders to preserve behavior.
 
 class FNO(nnx.Module):
     """N-Dimensional Fourier Neural Operator. The FNO learns a mapping between

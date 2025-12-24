@@ -10,8 +10,13 @@ from flax import nnx
 from typing import Optional, Tuple, List, Union
 
 # JAX/Flax NNX implementation of spectral_convolution.
+#
 # Ported from the original PyTorch implementation:
-# https://github.com/neuraloperator/neuraloperator/blob/main/neuralop/layers/spectral_convolution.py
+#   Repository: https://github.com/neuraloperator/neuraloperator
+#   File: neuralop/layers/spectral_convolution.py
+#   Commit: 14c0f7320dc7c94e907a16fd276248df2d71407c (2025-11-14)
+#   URL:
+#     https://github.com/neuraloperator/neuraloperator/blob/14c0f7320dc7c94e907a16fd276248df2d71407c/neuralop/layers/spectral_convolution.py
 #
 # Original code copyright (c) 2023 NeuralOperator developers
 # Licensed under the MIT License.
@@ -19,11 +24,7 @@ from typing import Optional, Tuple, List, Union
 # Note:
 #   The PyTorch implementation operates in NCHW (channels-first) format,
 #   while JAX/Flax NNX uses NHWC (channels-last). This port includes
-#   careful transformations between channel orders to preserve the
-#   original module's behavior while conforming to Flax/JAX conventions.
-#
-# This file contains a reimplementation and may include modifications
-# as required by the channel-layout differences.
+#   careful transformations between channel orders to preserve behavior.
 
 from .resample import resample
 
